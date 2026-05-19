@@ -320,6 +320,24 @@ fn single_session_streaming_response_does_not_draw_line_reveal_shimmer() {
 }
 
 #[test]
+fn single_session_streaming_text_fades_in() {
+    let (start_opacity, start_active) =
+        streaming_text_fade_opacity_for_elapsed(Duration::from_millis(0));
+    let (mid_opacity, mid_active) =
+        streaming_text_fade_opacity_for_elapsed(STREAMING_TEXT_FADE_DURATION / 2);
+    let (end_opacity, end_active) =
+        streaming_text_fade_opacity_for_elapsed(STREAMING_TEXT_FADE_DURATION);
+
+    assert!(start_active);
+    assert!(mid_active);
+    assert!(!end_active);
+    assert!((start_opacity - STREAMING_TEXT_FADE_START_OPACITY).abs() < f32::EPSILON);
+    assert!(mid_opacity > start_opacity);
+    assert!(mid_opacity < 1.0);
+    assert!((end_opacity - 1.0).abs() < f32::EPSILON);
+}
+
+#[test]
 fn single_session_ctrl_backspace_deletes_previous_word() {
     let mut app = SingleSessionApp::new(None);
     app.handle_key(KeyInput::Character("hello desktop world".to_string()));

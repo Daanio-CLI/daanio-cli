@@ -106,6 +106,19 @@ const SINGLE_SESSION_STREAMING_BODY_TEXT_WINDOW_BEFORE_LINES: usize = 2;
 const SINGLE_SESSION_STREAMING_BODY_TEXT_WINDOW_AFTER_LINES: usize = 4;
 const STREAMING_TEXT_FADE_DURATION: Duration = Duration::from_millis(120);
 const STREAMING_TEXT_FADE_START_OPACITY: f32 = 0.4;
+
+fn streaming_text_fade_opacity_for_elapsed(elapsed: Duration) -> (f32, bool) {
+    let progress =
+        (elapsed.as_secs_f32() / STREAMING_TEXT_FADE_DURATION.as_secs_f32()).clamp(0.0, 1.0);
+    if progress >= 1.0 {
+        return (1.0, false);
+    }
+    let eased = animation::ease_out_cubic(progress);
+    (
+        STREAMING_TEXT_FADE_START_OPACITY + (1.0 - STREAMING_TEXT_FADE_START_OPACITY) * eased,
+        true,
+    )
+}
 const DESKTOP_120FPS_FRAME_BUDGET: Duration = Duration::from_micros(8_333);
 const DESKTOP_PRESENT_STALL_BUDGET: Duration = Duration::from_millis(33);
 const DESKTOP_INPUT_LATENCY_BUDGET: Duration = Duration::from_millis(25);
@@ -6286,18 +6299,13 @@ impl<'window> Canvas<'window> {
         let Some(started_at) = self.single_session_streaming_fade_started_at else {
             return (1.0, false);
         };
-        let progress = (now.saturating_duration_since(started_at).as_secs_f32()
-            / STREAMING_TEXT_FADE_DURATION.as_secs_f32())
-        .clamp(0.0, 1.0);
-        if progress >= 1.0 {
+        let (opacity, active) =
+            streaming_text_fade_opacity_for_elapsed(now.saturating_duration_since(started_at));
+        if !active {
             self.single_session_streaming_fade_started_at = None;
             return (1.0, false);
         }
-        let eased = animation::ease_out_cubic(progress);
-        (
-            STREAMING_TEXT_FADE_START_OPACITY + (1.0 - STREAMING_TEXT_FADE_START_OPACITY) * eased,
-            true,
-        )
+        (opacity, true)
     }
 
     fn single_session_streaming_visible_range(
