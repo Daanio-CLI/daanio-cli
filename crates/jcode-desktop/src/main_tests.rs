@@ -37,6 +37,34 @@ fn desktop_config_parses_positive_millisecond_durations_only() {
 }
 
 #[test]
+fn desktop_process_role_parses_internal_flags() {
+    assert_eq!(
+        desktop_process_role_from_args(["jcode-desktop"].into_iter()),
+        DesktopProcessRole::Standalone
+    );
+    assert_eq!(
+        desktop_process_role_from_args(["jcode-desktop", "--desktop-host"].into_iter()),
+        DesktopProcessRole::StableHost
+    );
+    assert_eq!(
+        desktop_process_role_from_args(["jcode-desktop", "--desktop-app-worker"].into_iter()),
+        DesktopProcessRole::AppWorker
+    );
+    assert_eq!(
+        desktop_process_role_from_args(
+            ["jcode-desktop", "--desktop-process-role=stable_host"].into_iter()
+        ),
+        DesktopProcessRole::StableHost
+    );
+    assert_eq!(
+        desktop_process_role_from_args(
+            ["jcode-desktop", "--desktop-process-role", "app-worker"].into_iter()
+        ),
+        DesktopProcessRole::AppWorker
+    );
+}
+
+#[test]
 fn desktop_platform_warnings_only_fire_for_less_supported_targets() {
     assert_eq!(
         desktop_platform_support_warning(DesktopPlatform::Linux),

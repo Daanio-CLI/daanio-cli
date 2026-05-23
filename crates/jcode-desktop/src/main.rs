@@ -498,6 +498,7 @@ async fn run() -> Result<()> {
     let fullscreen = args.iter().any(|arg| arg == "--fullscreen");
     let desktop_gallery_state = desktop_gallery::state_from_args(&args);
     let desktop_gallery = desktop_gallery_state.is_some();
+    let process_role = desktop_process_role_from_args(args.iter().map(String::as_str));
     let desktop_mode = desktop_mode_from_args(args.iter().map(String::as_str));
     let resume_session_id = desktop_resume_session_id_from_args(args.iter().map(String::as_str));
     let desktop_reload_startup = DesktopReloadStartup::from_env();
@@ -505,6 +506,7 @@ async fn run() -> Result<()> {
         "jcode-desktop-launch-profile",
         serde_json::json!({
             "mode": desktop_mode.as_str(),
+            "process_role": process_role.as_str(),
             "version": desktop_header_version_label(),
             "build_hash": desktop_build_hash_label(),
             "pid": std::process::id(),
@@ -1834,6 +1836,9 @@ const DESKTOP_HELP_LINES: &[&str] = &[
     "Options:",
     "  --fullscreen                 Start borderless fullscreen",
     "  --workspace                  Open the workspace prototype instead of the single-session chat",
+    "  --desktop-process-role ROLE  Internal: standalone, host, or worker",
+    "  --desktop-host               Internal alias for --desktop-process-role=host",
+    "  --desktop-app-worker         Internal alias for --desktop-process-role=worker",
     "  --startup-log                Print launch timing milestones to stderr",
     "  --startup-benchmark          Print launch timings and exit after the first frame",
     "  --capture-hero-animation DIR Write deterministic hero animation PNG frames and exit",
@@ -4441,6 +4446,23 @@ enum DesktopMode {
     WorkspacePrototype,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DesktopProcessRole {
+    Standalone,
+    StableHost,
+    AppWorker,
+}
+
+impl DesktopProcessRole {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Standalone => "standalone",
+            Self::StableHost => "stable_host",
+            Self::AppWorker => "app_worker",
+        }
+    }
+}
+
 impl DesktopMode {
     fn as_str(self) -> &'static str {
         match self {
@@ -4456,6 +4478,34 @@ fn desktop_mode_from_args<'a>(args: impl IntoIterator<Item = &'a str>) -> Deskto
     } else {
         DesktopMode::SingleSession
     }
+}
+
+fn desktop_process_role_from_args<'a>(
+    args: impl IntoIterator<Item = &'a str>,
+) -> DesktopProcessRole {
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        let role = arg
+            .strip_prefix("--desktop-process-role=")
+            .or_else(|| {
+                (arg == "--desktop-process-role")
+                    .then(|| args.next())
+                    .flatten()
+            })
+            .or_else(|| {
+                (arg == "--desktop-host")
+                    .then_some("host")
+                    .or_else(|| (arg == "--desktop-app-worker").then_some("worker"))
+            });
+        if let Some(role) = role {
+            return match role {
+                "host" | "stable-host" | "stable_host" => DesktopProcessRole::StableHost,
+                "worker" | "app-worker" | "app_worker" => DesktopProcessRole::AppWorker,
+                _ => DesktopProcessRole::Standalone,
+            };
+        }
+    }
+    DesktopProcessRole::Standalone
 }
 
 fn desktop_resume_session_id_from_args<'a>(
