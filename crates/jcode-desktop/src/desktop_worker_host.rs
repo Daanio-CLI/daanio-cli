@@ -18,6 +18,7 @@ pub(crate) struct DesktopWorkerConnection {
     writer: DesktopWorkerIpcWriter<ChildStdin>,
     events: Receiver<Result<DesktopWorkerToHostEnvelope, DesktopIpcFrameError>>,
     reader_thread: Option<JoinHandle<()>>,
+    initialized: bool,
 }
 
 impl DesktopWorkerConnection {
@@ -58,6 +59,7 @@ impl DesktopWorkerConnection {
             writer: DesktopWorkerIpcWriter::new(stdin),
             events,
             reader_thread: Some(reader_thread),
+            initialized: false,
         })
     }
 
@@ -66,7 +68,16 @@ impl DesktopWorkerConnection {
     }
 
     pub(crate) fn send(&mut self, message: DesktopHostToWorkerMessage) -> Result<()> {
-        self.writer.send(message).map_err(anyhow::Error::from)
+        let is_initialize = matches!(message, DesktopHostToWorkerMessage::Initialize(_));
+        self.writer.send(message).map_err(anyhow::Error::from)?;
+        if is_initialize {
+            self.initialized = true;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn initialized(&self) -> bool {
+        self.initialized
     }
 
     pub(crate) fn try_recv(

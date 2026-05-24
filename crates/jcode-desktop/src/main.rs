@@ -34,8 +34,8 @@ use desktop_benchmark::*;
 use desktop_config::*;
 use desktop_ipc::{DesktopHostToWorkerEnvelope, write_desktop_ipc_frame};
 use desktop_protocol::{
-    DesktopProtocolEnvelope, DesktopWorkerMode, DesktopWorkerReady, DesktopWorkerShutdownReason,
-    DesktopWorkerToHostMessage,
+    DesktopHostToWorkerMessage, DesktopProtocolEnvelope, DesktopWindowState, DesktopWorkerInit,
+    DesktopWorkerMode, DesktopWorkerReady, DesktopWorkerShutdownReason, DesktopWorkerToHostMessage,
 };
 use desktop_scene::{
     DesktopColor, DesktopDisplayCommand, DesktopRect as DesktopSceneRect, DesktopRectPaint,
@@ -4949,7 +4949,7 @@ impl DesktopHotReloader {
                 desktop_log::info(format_args!(
                     "jcode-desktop: {reason} requested app-worker restart; keeping stable host window alive"
                 ));
-                self.restart_app_worker(app, relaunch, binary, reason);
+                self.restart_app_worker(app, window, relaunch, binary, reason);
                 false
             }
         }
@@ -4958,6 +4958,7 @@ impl DesktopHotReloader {
     fn restart_app_worker(
         &mut self,
         app: &DesktopApp,
+        window: &Window,
         relaunch: &DesktopRelaunch,
         binary: PathBuf,
         reason: &'static str,
@@ -4972,7 +4973,24 @@ impl DesktopHotReloader {
 
         let worker_relaunch = relaunch.for_app(app, binary).for_app_worker();
         match worker_relaunch.spawn_app_worker() {
-            Ok(worker) => {
+            Ok(mut worker) => {
+                if let Err(error) =
+                    worker.send(DesktopHostToWorkerMessage::Initialize(DesktopWorkerInit {
+                        mode: desktop_worker_mode_for_app(app),
+                        snapshot: Some(app.snapshot()),
+                        window: desktop_window_state(window),
+                    }))
+                {
+                    desktop_log::error(format_args!(
+                        "jcode-desktop: failed to initialize app worker for {reason}: {error:#}"
+                    ));
+                    if let Err(kill_error) = worker.kill() {
+                        desktop_log::warn(format_args!(
+                            "jcode-desktop: failed to kill uninitialized app worker: {kill_error:#}"
+                        ));
+                    }
+                    return;
+                }
                 desktop_log::info(format_args!(
                     "jcode-desktop: app worker restarted for {reason}; pid={}",
                     worker.child_id()
@@ -5038,6 +5056,23 @@ impl DesktopHotReloader {
                 true
             }
         }
+    }
+}
+
+fn desktop_worker_mode_for_app(app: &DesktopApp) -> DesktopWorkerMode {
+    match app {
+        DesktopApp::SingleSession(_) => DesktopWorkerMode::SingleSession,
+        DesktopApp::Workspace(_) => DesktopWorkerMode::Workspace,
+    }
+}
+
+fn desktop_window_state(window: &Window) -> DesktopWindowState {
+    let size = window.inner_size();
+    DesktopWindowState {
+        width: size.width,
+        height: size.height,
+        scale_factor: window.scale_factor() as f32,
+        focused: window.has_focus(),
     }
 }
 
