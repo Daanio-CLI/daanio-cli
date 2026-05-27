@@ -84,7 +84,7 @@ impl MultiProvider {
         provider: LoginProviderDescriptor,
     ) -> Option<&'static str> {
         match provider.target {
-            LoginProviderTarget::Claude => Some("claude"),
+            LoginProviderTarget::Claude | LoginProviderTarget::ClaudeApiKey => Some("claude"),
             LoginProviderTarget::OpenAi | LoginProviderTarget::OpenAiApiKey => Some("openai"),
             LoginProviderTarget::OpenRouter => Some("openrouter"),
             LoginProviderTarget::Bedrock => Some("bedrock"),
