@@ -812,7 +812,9 @@ pub(super) fn handle_help_command(app: &mut App, trimmed: &str) -> bool {
 }
 
 pub(super) fn handle_model_status_command(app: &mut App, trimmed: &str) -> bool {
-    let Some(rest) = slash_command_rest(trimmed, "/model-status") else {
+    let Some(rest) = slash_command_rest(trimmed, "/provider-test-coverage")
+        .or_else(|| slash_command_rest(trimmed, "/model-status"))
+    else {
         return false;
     };
 

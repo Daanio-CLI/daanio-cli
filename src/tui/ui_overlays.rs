@@ -131,8 +131,8 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
     lines.push(help_entry("/model", "List or switch models"));
     lines.push(help_entry("/model <name>", "Switch to a different model"));
     lines.push(help_entry(
-        "/model-status",
-        "Show live-test evidence for the current model",
+        "/provider-test-coverage",
+        "Show live-test evidence for the current provider/model",
     ));
     lines.push(help_entry("/agents", "Configure models for agent roles"));
     lines.push(help_entry(
@@ -514,7 +514,7 @@ pub(super) fn draw_model_status_overlay(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" /model-status "),
+                .title(" /provider-test-coverage "),
         )
         .scroll((scroll.min(u16::MAX as usize) as u16, 0));
     frame.render_widget(paragraph, area);
