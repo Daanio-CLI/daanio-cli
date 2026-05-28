@@ -1350,12 +1350,13 @@ async fn refresh_model_catalog_with_progress(
             _ = heartbeat.tick() => {
                 let elapsed_secs = started.elapsed().as_secs();
                 if elapsed_secs > 0 {
+                    let percent = (10 + elapsed_secs.saturating_mul(5)).min(95) as u8;
                     crate::bus::Bus::global().publish(crate::bus::BusEvent::UiActivity(
                         crate::bus::UiActivity::catalog(
                             Some(session_id.clone()),
                             crate::message::format_model_refresh_progress_markdown(
                                 &format!("Waiting on provider APIs ({elapsed_secs}s elapsed)"),
-                                None,
+                                Some(percent),
                             ),
                             Some("Refreshing model list..."),
                         ),
@@ -1371,7 +1372,10 @@ impl App {
         &mut self,
         completed: crate::bus::ModelRefreshCompleted,
     ) {
-        if self.active_client_session_id() != Some(completed.session_id.as_str()) {
+        let completion_matches_active =
+            self.active_client_session_id() == Some(completed.session_id.as_str());
+        let completion_matches_local = completed.session_id == self.session.id;
+        if !completion_matches_active && !completion_matches_local {
             return;
         }
         match completed.result {

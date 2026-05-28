@@ -219,7 +219,7 @@ fn test_remote_catalog_activity_notification_upserts_progress_card() {
         ),
         crate::message::format_model_refresh_progress_markdown(
             "Waiting on provider APIs (2s elapsed)",
-            None,
+            Some(20),
         ),
     ] {
         app.handle_server_event(

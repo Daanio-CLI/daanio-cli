@@ -277,7 +277,7 @@ mod tests {
             ),
             (
                 "claude-opus-4-6",
-                route("Anthropic", "api-key"),
+                route("Anthropic", "claude-api"),
                 "claude-api:claude-opus-4-6",
             ),
             (
