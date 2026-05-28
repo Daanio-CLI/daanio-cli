@@ -428,9 +428,13 @@ impl AnthropicCredentialMode {
     }
 }
 
-fn load_anthropic_api_key() -> Result<String> {
+pub(crate) fn load_anthropic_api_key() -> Result<String> {
     crate::provider_catalog::load_api_key_from_env_or_config("ANTHROPIC_API_KEY", "anthropic.env")
         .context("No Anthropic API key found")
+}
+
+pub(crate) fn has_anthropic_api_key() -> bool {
+    load_anthropic_api_key().is_ok()
 }
 
 /// Direct Anthropic API provider
