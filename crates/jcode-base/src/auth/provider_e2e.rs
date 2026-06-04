@@ -22,10 +22,11 @@ use crate::auth::lifecycle::{
     AuthActivationRequest, activate_auth_change, validate_catalog_invariants,
 };
 use crate::auth::live_provider_probes::{
-    fetch_live_openai_compatible_models, run_live_claude_native_smoke,
-    run_live_claude_native_stream_smoke, run_live_claude_native_tool_smoke,
-    run_live_openai_compatible_smoke, run_live_openai_compatible_stream_smoke,
-    run_live_openai_compatible_tool_smoke,
+    fetch_live_openai_compatible_models, run_live_antigravity_native_smoke,
+    run_live_antigravity_native_stream_smoke, run_live_antigravity_native_tool_smoke,
+    run_live_claude_native_smoke, run_live_claude_native_stream_smoke,
+    run_live_claude_native_tool_smoke, run_live_openai_compatible_smoke,
+    run_live_openai_compatible_stream_smoke, run_live_openai_compatible_tool_smoke,
 };
 use crate::live_tests::{
     self, LiveVerificationAuth, LiveVerificationEvent, LiveVerificationResult,
@@ -442,11 +443,12 @@ pub async fn run_provider_e2e(
 
 /// The native-runtime providers this doctor can drive directly (i.e. providers
 /// whose live path is not OpenAI-compatible and so cannot be exercised by
-/// [`run_provider_e2e`]). Today this is the Claude OAuth/subscription provider.
+/// [`run_provider_e2e`]). Today this is the Claude OAuth/subscription provider
+/// and the Antigravity (Google OAuth Cloud Code) provider.
 pub fn native_doctor_supports_provider(provider_id: &str) -> bool {
     matches!(
         crate::auth::lifecycle::normalized_auth_provider_id(Some(provider_id)),
-        Some("claude")
+        Some("claude") | Some("antigravity")
     )
 }
 
@@ -788,6 +790,349 @@ async fn run_native_claude_api_checks(
 
     // Tool call + derived execution/result/smoke checkpoints (one round-trip).
     match run_live_claude_native_tool_smoke(selected).await {
+        Ok(stage) => {
+            spend.accumulate(stage.evidence.get("usage"), stage.evidence.get("cost"));
+            for checkpoint in [
+                checkpoints::TOOL_CALL_PARSE,
+                checkpoints::TOOL_EXECUTION_LOOP,
+                checkpoints::TOOL_RESULT_FOLLOWUP,
+                checkpoints::REAL_JCODE_TOOL_SMOKE,
+            ] {
+                checks.push(DoctorCheck::passed(
+                    checkpoint,
+                    label_for(checkpoint),
+                    "tool call parsed and executed".to_string(),
+                ));
+            }
+        }
+        Err(error) => {
+            for checkpoint in [
+                checkpoints::TOOL_CALL_PARSE,
+                checkpoints::TOOL_EXECUTION_LOOP,
+                checkpoints::TOOL_RESULT_FOLLOWUP,
+                checkpoints::REAL_JCODE_TOOL_SMOKE,
+            ] {
+                checks.push(DoctorCheck::failed(
+                    checkpoint,
+                    label_for(checkpoint),
+                    error.to_string(),
+                ));
+            }
+        }
+    }
+}
+
+/// The wiring contract for the native Antigravity (Google OAuth Cloud Code)
+/// provider.
+///
+/// `antigravity` activates the `Antigravity` runtime and routes through the
+/// `antigravity:` model-switch prefix; its live-catalog routes carry the
+/// `https` api_method (parsed as [`ModelRouteApiMethod::AntigravityHttps`]) and
+/// the `Antigravity` provider label.
+fn native_antigravity_wiring_contract() -> WiringContract {
+    WiringContract {
+        api_method: "https".to_string(),
+        route_provider: "Antigravity".to_string(),
+        expected_runtime: "antigravity",
+        expected_namespace: None,
+        switch_prefix: "antigravity:".to_string(),
+    }
+}
+
+/// Credential descriptor for the native Antigravity doctor. Antigravity uses
+/// Google OAuth tokens minted by `jcode login --provider antigravity`; the
+/// tokens rotate and are never persisted here, so we record only the source
+/// (and the resolved Google account email when available) without a secret.
+fn native_antigravity_auth(account: &str) -> LiveVerificationAuth {
+    let source = if account.trim().is_empty() {
+        "Antigravity Google OAuth via auth.json".to_string()
+    } else {
+        format!("Antigravity Google OAuth ({account}) via auth.json")
+    };
+    LiveVerificationAuth::non_secret(source, None::<String>)
+}
+
+/// Pick the cheapest sensible Antigravity model from a catalog for a smoke run.
+///
+/// Prefers a Gemini Flash tier (cheapest, and the backend's native path that
+/// accepts every schema construct jcode emits), then any Gemini model, then any
+/// available catalog model. Returns `None` when the catalog is empty, letting
+/// the caller fall back to the runtime default.
+fn cheapest_antigravity_model(catalog_models: &[String]) -> Option<String> {
+    let is_alias = |m: &&String| m.trim().is_empty() || m.trim() == "default";
+    if let Some(flash) = catalog_models
+        .iter()
+        .filter(|m| !is_alias(m))
+        .find(|m| {
+            let lower = m.to_ascii_lowercase();
+            lower.starts_with("gemini") && lower.contains("flash")
+        })
+    {
+        return Some(flash.clone());
+    }
+    if let Some(gemini) = catalog_models
+        .iter()
+        .filter(|m| !is_alias(m))
+        .find(|m| m.to_ascii_lowercase().starts_with("gemini"))
+    {
+        return Some(gemini.clone());
+    }
+    catalog_models
+        .iter()
+        .find(|m| !is_alias(m))
+        .cloned()
+}
+
+/// Run the strict provider/model diagnostic for the **native Antigravity**
+/// provider.
+///
+/// The native-runtime counterpart to [`run_provider_e2e`] for Antigravity:
+/// instead of driving an OpenAI-compatible HTTP shim, it exercises the
+/// production [`AntigravityProvider`] runtime end to end (Google OAuth token
+/// load/refresh, project resolution, the live `fetchAvailableModels` catalog,
+/// request shaping, the per-model schema normalization, the Gemini->StreamEvent
+/// translation, and Gemini-3 thought-signature tool round-trips). It records the
+/// same strict checkpoints so the coverage ledger can promote `antigravity` to
+/// READY exactly like a doctor-drivable provider.
+pub async fn run_antigravity_native_e2e(
+    provider_id: &str,
+    requested_model: Option<&str>,
+    tier: DoctorTier,
+) -> anyhow::Result<DoctorReport> {
+    use crate::provider::Provider;
+    use crate::provider::antigravity::AntigravityProvider;
+
+    // The antigravity login provider has a single fixed id; accept any alias the
+    // caller passed (e.g. "antigravity") and normalize to the canonical id.
+    let _ = crate::auth::lifecycle::normalized_auth_provider_id(Some(provider_id));
+    let provider_label = crate::auth::lifecycle::provider_display_label(Some("antigravity"))
+        .unwrap_or_else(|| "Antigravity".to_string());
+    let provider_id = "antigravity".to_string();
+    let mut checks: Vec<DoctorCheck> = Vec::new();
+
+    let runtime = AntigravityProvider::new();
+
+    // --- Stage 1: credential resolution (Google OAuth tokens) ---
+    let mut account = String::new();
+    if tier.requires_api_key() {
+        match runtime.resolve_account_for_doctor().await {
+            Ok(resolved) => {
+                account = resolved;
+                let detail = if account.trim().is_empty() {
+                    "Resolved Antigravity Google OAuth credential".to_string()
+                } else {
+                    format!("Resolved Antigravity Google OAuth credential ({account})")
+                };
+                checks.push(DoctorCheck::passed(
+                    checkpoints::AUTH_CREDENTIAL_LOADED,
+                    label_for(checkpoints::AUTH_CREDENTIAL_LOADED),
+                    detail,
+                ));
+            }
+            Err(error) => {
+                checks.push(DoctorCheck::failed(
+                    checkpoints::AUTH_CREDENTIAL_LOADED,
+                    label_for(checkpoints::AUTH_CREDENTIAL_LOADED),
+                    format!(
+                        "could not resolve an Antigravity credential: {error}. \
+                         Run `jcode login --provider antigravity` to sign in."
+                    ),
+                ));
+                return Ok(finish_report(
+                    provider_id,
+                    provider_label,
+                    requested_model.unwrap_or("").to_string(),
+                    tier,
+                    checks,
+                    DoctorSpend::default(),
+                    native_antigravity_auth(&account),
+                ));
+            }
+        }
+    } else {
+        checks.push(DoctorCheck::skipped(
+            checkpoints::AUTH_CREDENTIAL_LOADED,
+            label_for(checkpoints::AUTH_CREDENTIAL_LOADED),
+            "offline tier: no credential required".to_string(),
+        ));
+    }
+
+    // --- Stage 2: live model catalog (or synthetic for offline) ---
+    let catalog_models: Vec<String> = if tier.requires_api_key() {
+        match runtime.fetch_live_model_ids_for_doctor().await {
+            Ok(models) if !models.is_empty() => {
+                checks.push(DoctorCheck::passed(
+                    checkpoints::MODEL_CATALOG_LIVE_ENDPOINT,
+                    label_for(checkpoints::MODEL_CATALOG_LIVE_ENDPOINT),
+                    format!("{} live model(s) returned", models.len()),
+                ));
+                models
+            }
+            Ok(_) => {
+                checks.push(DoctorCheck::failed(
+                    checkpoints::MODEL_CATALOG_LIVE_ENDPOINT,
+                    label_for(checkpoints::MODEL_CATALOG_LIVE_ENDPOINT),
+                    "live Antigravity catalog returned no available models".to_string(),
+                ));
+                return Ok(finish_report(
+                    provider_id,
+                    provider_label,
+                    requested_model.unwrap_or("").to_string(),
+                    tier,
+                    checks,
+                    DoctorSpend::default(),
+                    native_antigravity_auth(&account),
+                ));
+            }
+            Err(error) => {
+                checks.push(DoctorCheck::failed(
+                    checkpoints::MODEL_CATALOG_LIVE_ENDPOINT,
+                    label_for(checkpoints::MODEL_CATALOG_LIVE_ENDPOINT),
+                    error.to_string(),
+                ));
+                return Ok(finish_report(
+                    provider_id,
+                    provider_label,
+                    requested_model.unwrap_or("").to_string(),
+                    tier,
+                    checks,
+                    DoctorSpend::default(),
+                    native_antigravity_auth(&account),
+                ));
+            }
+        }
+    } else {
+        checks.push(DoctorCheck::skipped(
+            checkpoints::MODEL_CATALOG_LIVE_ENDPOINT,
+            label_for(checkpoints::MODEL_CATALOG_LIVE_ENDPOINT),
+            "offline tier: using known Antigravity model ids (no network)".to_string(),
+        ));
+        runtime
+            .available_models()
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    };
+
+    // Pick the model under test. Without an explicit request, prefer the
+    // cheapest Gemini Flash tier (cheapest + native path) so the live smoke run
+    // spends as little quota as possible.
+    let default_model = runtime.model();
+    let selected = match requested_model.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(model) => {
+            if tier.requires_api_key() && !catalog_models.iter().any(|m| m == model) {
+                checks.push(DoctorCheck::failed(
+                    checkpoints::MODEL_CATALOG_LIVE_ENDPOINT,
+                    label_for(checkpoints::MODEL_CATALOG_LIVE_ENDPOINT),
+                    format!(
+                        "requested model `{model}` is not in the live catalog ({} model(s): {})",
+                        catalog_models.len(),
+                        truncate_list(&catalog_models)
+                    ),
+                ));
+                return Ok(finish_report(
+                    provider_id,
+                    provider_label,
+                    model.to_string(),
+                    tier,
+                    checks,
+                    DoctorSpend::default(),
+                    native_antigravity_auth(&account),
+                ));
+            }
+            model.to_string()
+        }
+        None => cheapest_antigravity_model(&catalog_models)
+            .or_else(|| {
+                catalog_models
+                    .iter()
+                    .find(|m| **m == default_model)
+                    .cloned()
+            })
+            .or_else(|| catalog_models.first().cloned())
+            .unwrap_or(default_model),
+    };
+
+    // --- Stage 3: auth-lifecycle wiring (catalog reload, picker, fallback, switch) ---
+    run_wiring_checks_for_contract(
+        &provider_id,
+        &native_antigravity_wiring_contract(),
+        &selected,
+        &catalog_models,
+        &mut checks,
+    );
+
+    // --- Stage 4: API-dependent checkpoints (live native runtime) ---
+    let mut spend = DoctorSpend::default();
+    if tier == DoctorTier::Full {
+        run_native_antigravity_api_checks(&selected, &mut checks, &mut spend).await;
+    } else {
+        for checkpoint in API_DEPENDENT_CHECKPOINTS {
+            checks.push(DoctorCheck::skipped(
+                checkpoint,
+                label_for(checkpoint),
+                format!(
+                    "{} tier: requires --tier full (spends quota)",
+                    tier.as_str()
+                ),
+            ));
+        }
+    }
+
+    Ok(finish_report(
+        provider_id,
+        provider_label,
+        selected,
+        tier,
+        checks,
+        spend,
+        native_antigravity_auth(&account),
+    ))
+}
+
+/// Drive the three live native-Antigravity probes and fold their results into
+/// the six API-dependent checkpoints, mirroring [`run_native_claude_api_checks`].
+async fn run_native_antigravity_api_checks(
+    selected: &str,
+    checks: &mut Vec<DoctorCheck>,
+    spend: &mut DoctorSpend,
+) {
+    // Non-streaming completion.
+    match run_live_antigravity_native_smoke(selected).await {
+        Ok(stage) => {
+            spend.accumulate(stage.evidence.get("usage"), stage.evidence.get("cost"));
+            checks.push(DoctorCheck::passed(
+                checkpoints::NON_STREAMING_CHAT_COMPLETION,
+                label_for(checkpoints::NON_STREAMING_CHAT_COMPLETION),
+                "received expected completion".to_string(),
+            ));
+        }
+        Err(error) => checks.push(DoctorCheck::failed(
+            checkpoints::NON_STREAMING_CHAT_COMPLETION,
+            label_for(checkpoints::NON_STREAMING_CHAT_COMPLETION),
+            error.to_string(),
+        )),
+    }
+
+    // Streaming completion.
+    match run_live_antigravity_native_stream_smoke(selected).await {
+        Ok(stage) => {
+            spend.accumulate(stage.evidence.get("usage"), stage.evidence.get("cost"));
+            checks.push(DoctorCheck::passed(
+                checkpoints::STREAMING_CHAT_COMPLETION,
+                label_for(checkpoints::STREAMING_CHAT_COMPLETION),
+                "received expected streamed completion".to_string(),
+            ));
+        }
+        Err(error) => checks.push(DoctorCheck::failed(
+            checkpoints::STREAMING_CHAT_COMPLETION,
+            label_for(checkpoints::STREAMING_CHAT_COMPLETION),
+            error.to_string(),
+        )),
+    }
+
+    // Tool call + derived execution/result/smoke checkpoints (one round-trip).
+    match run_live_antigravity_native_tool_smoke(selected).await {
         Ok(stage) => {
             spend.accumulate(stage.evidence.get("usage"), stage.evidence.get("cost"));
             for checkpoint in [
@@ -1307,5 +1652,71 @@ mod tests {
         assert_eq!(spend.completion_tokens, 3);
         assert_eq!(spend.total_tokens, 10);
         assert!(spend.has_token_data);
+    }
+
+    #[test]
+    fn native_doctor_supports_claude_and_antigravity() {
+        assert!(native_doctor_supports_provider("claude"));
+        assert!(native_doctor_supports_provider("anthropic"));
+        assert!(native_doctor_supports_provider("antigravity"));
+        // OpenAI-compatible profiles are driven by the generic doctor, not the
+        // native path.
+        assert!(!native_doctor_supports_provider("openrouter"));
+        assert!(!native_doctor_supports_provider("definitely-not-a-provider"));
+    }
+
+    #[test]
+    fn native_antigravity_contract_routes_via_https_prefix() {
+        let contract = native_antigravity_wiring_contract();
+        assert_eq!(contract.api_method, "https");
+        assert_eq!(contract.route_provider, "Antigravity");
+        assert_eq!(contract.expected_runtime, "antigravity");
+        assert!(contract.expected_namespace.is_none());
+        assert_eq!(contract.switch_prefix, "antigravity:");
+    }
+
+    #[test]
+    fn cheapest_antigravity_model_prefers_gemini_flash() {
+        let catalog = vec![
+            "claude-opus-4-6-thinking".to_string(),
+            "gemini-3.1-pro-high".to_string(),
+            "gemini-3-flash".to_string(),
+            "gpt-oss-120b-medium".to_string(),
+        ];
+        assert_eq!(
+            cheapest_antigravity_model(&catalog).as_deref(),
+            Some("gemini-3-flash")
+        );
+    }
+
+    #[test]
+    fn cheapest_antigravity_model_falls_back_to_any_gemini_then_any_model() {
+        // No flash tier: any Gemini wins.
+        let gemini_only = vec![
+            "claude-sonnet-4-6".to_string(),
+            "gemini-3.1-pro-low".to_string(),
+        ];
+        assert_eq!(
+            cheapest_antigravity_model(&gemini_only).as_deref(),
+            Some("gemini-3.1-pro-low")
+        );
+        // No Gemini at all: first non-alias model wins.
+        let no_gemini = vec!["default".to_string(), "claude-sonnet-4-6".to_string()];
+        assert_eq!(
+            cheapest_antigravity_model(&no_gemini).as_deref(),
+            Some("claude-sonnet-4-6")
+        );
+        // Only the alias: nothing usable.
+        let alias_only = vec!["default".to_string()];
+        assert!(cheapest_antigravity_model(&alias_only).is_none());
+    }
+
+    #[test]
+    fn native_antigravity_auth_is_secret_free() {
+        let with_account = native_antigravity_auth("user@example.com");
+        // The source mentions the account but never carries a secret fingerprint.
+        assert!(with_account.source.contains("user@example.com"));
+        let anonymous = native_antigravity_auth("");
+        assert!(anonymous.source.contains("Antigravity Google OAuth"));
     }
 }

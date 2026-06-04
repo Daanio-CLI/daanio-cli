@@ -15,6 +15,7 @@ use serde::Deserialize;
 use crate::message::{ContentBlock, Message, Role, StreamEvent, ToolDefinition};
 use crate::provider::Provider;
 use crate::provider::anthropic::AnthropicProvider;
+use crate::provider::antigravity::AntigravityProvider;
 use crate::provider_catalog::{OpenAiCompatibleProfile, ResolvedOpenAiCompatibleProfile};
 
 /// Apply the right auth headers for a resolved OpenAI-compatible profile.
@@ -527,6 +528,11 @@ struct NativeClaudeToolCall {
     id: String,
     name: String,
     input_json: String,
+    /// Gemini 3 "thought signature" replayed back on the matching `functionCall`
+    /// part in later turns. The Antigravity/Cloud Code backend rejects a
+    /// follow-up turn whose tool_use omits it. `None` for providers (e.g.
+    /// Claude) that do not emit thought signatures.
+    thought_signature: Option<String>,
 }
 
 impl NativeClaudeStreamOutcome {
@@ -556,10 +562,16 @@ impl NativeClaudeStreamOutcome {
     }
 }
 
-/// Drive `AnthropicProvider::complete` and fold the resulting stream into a
-/// single outcome, surfacing any provider-emitted error as a hard failure.
-async fn consume_native_claude_stream(
-    provider: &AnthropicProvider,
+/// Drive any native [`Provider`] runtime's `complete` and fold the resulting
+/// stream into a single outcome, surfacing any provider-emitted error as a hard
+/// failure.
+///
+/// Shared by the native Claude and native Antigravity probes: both drive the
+/// production provider runtime (auth, request shaping, SSE/stream translation,
+/// tool-name mapping) rather than re-implementing the wire protocol, so the
+/// doctor exercises the exact code path a real session uses.
+async fn consume_native_stream(
+    provider: &dyn Provider,
     messages: &[Message],
     tools: &[ToolDefinition],
     system: &str,
@@ -570,7 +582,7 @@ async fn consume_native_claude_stream(
     let mut stream = provider
         .complete(messages, tools, system, None)
         .await
-        .context("open native Claude stream")?;
+        .context("open native provider stream")?;
 
     tokio::time::timeout(timeout, async move {
         let mut outcome = NativeClaudeStreamOutcome::default();
@@ -590,6 +602,7 @@ async fn consume_native_claude_stream(
                         id,
                         name,
                         input_json: String::new(),
+                        thought_signature: None,
                     });
                 }
                 StreamEvent::ToolInputDelta(fragment) => {
@@ -600,6 +613,15 @@ async fn consume_native_claude_stream(
                 StreamEvent::ToolUseEnd => {
                     if let Some(tool) = pending_tool.take() {
                         outcome.tool_calls.push(tool);
+                    }
+                }
+                // Emitted after the matching `ToolUseEnd`; attach it to the most
+                // recent tool call so probes can replay it on the next turn.
+                StreamEvent::ToolUseSignature(signature) => {
+                    if let Some(tool) = outcome.tool_calls.last_mut() {
+                        if !signature.is_empty() {
+                            tool.thought_signature = Some(signature);
+                        }
                     }
                 }
                 StreamEvent::TokenUsage {
@@ -660,7 +682,7 @@ pub async fn run_live_claude_native_smoke(
         tool_duration_ms: None,
     }];
     let system = "You are a live provider smoke test. Answer with the exact requested token only.";
-    let outcome = consume_native_claude_stream(
+    let outcome = consume_native_stream(
         &provider,
         &messages,
         &[],
@@ -732,7 +754,7 @@ pub async fn run_live_claude_native_stream_smoke(
     let mut last_err: Option<String> = None;
     while attempts < MAX_ATTEMPTS {
         attempts += 1;
-        let candidate = consume_native_claude_stream(
+        let candidate = consume_native_stream(
             &provider,
             &messages,
             &[],
@@ -842,7 +864,7 @@ pub async fn run_live_claude_native_tool_smoke(
         tool_duration_ms: None,
     }];
 
-    let first = consume_native_claude_stream(
+    let first = consume_native_stream(
         &provider,
         &first_turn,
         &tools,
@@ -903,7 +925,7 @@ pub async fn run_live_claude_native_tool_smoke(
         tool_duration_ms: None,
     });
 
-    let second = consume_native_claude_stream(
+    let second = consume_native_stream(
         &provider,
         &followup,
         &tools,
@@ -937,6 +959,309 @@ pub async fn run_live_claude_native_tool_smoke(
         "followup_consumed_result",
         serde_json::json!(true),
     );
+    if total_input != 0 || total_output != 0 {
+        stage = stage.with_evidence("usage", usage_evidence(total_input, total_output, 0, 0));
+    }
+    Ok(stage)
+}
+
+// === Native Antigravity probes ============================================
+//
+// Antigravity is a Google OAuth login provider whose `generateContent` runtime
+// multiplexes Gemini, Claude, and gpt-oss upstreams behind one Cloud Code
+// endpoint. Like the native Claude probes, these drive the production
+// [`AntigravityProvider`] runtime end-to-end (OAuth token load/refresh, project
+// resolution, request shaping, the Gemini->StreamEvent translation, the
+// per-model schema normalization, and Gemini-3 thought-signature replay) so
+// `provider-doctor antigravity` exercises the exact path a real session uses.
+
+/// Build a fresh native Antigravity provider pinned to `model`.
+fn build_native_antigravity_provider(model: &str) -> anyhow::Result<AntigravityProvider> {
+    let provider = AntigravityProvider::new();
+    provider
+        .set_model(model)
+        .with_context(|| format!("select Antigravity model `{model}` for native probe"))?;
+    Ok(provider)
+}
+
+/// Stage: non-streaming chat completion (a single coherent final answer).
+pub async fn run_live_antigravity_native_smoke(
+    model: &str,
+) -> anyhow::Result<crate::live_tests::LiveVerificationStage> {
+    let started = std::time::Instant::now();
+    let provider = build_native_antigravity_provider(model)?;
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "Reply with exactly AUTH_TEST_OK and nothing else.".to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+    let system = "You are a live provider smoke test. Answer with the exact requested token only.";
+    let outcome = consume_native_stream(
+        &provider,
+        &messages,
+        &[],
+        system,
+        std::time::Duration::from_secs(90),
+    )
+    .await?;
+
+    ensure!(
+        outcome.saw_message_end,
+        "native Antigravity smoke ended without a message_end event ({})",
+        outcome.diagnostics()
+    );
+    ensure!(
+        outcome.text.contains("AUTH_TEST_OK"),
+        "native Antigravity smoke returned unexpected content: {:?} ({})",
+        crate::util::truncate_str(outcome.text.trim(), 200),
+        outcome.diagnostics()
+    );
+
+    let mut stage = crate::live_tests::LiveVerificationStage::passed(
+        crate::live_tests::checkpoints::NON_STREAMING_CHAT_COMPLETION,
+    )
+    .with_duration_ms(started.elapsed().as_millis() as u64)
+    .with_evidence("model", serde_json::json!(model))
+    .with_evidence("matched_expected_content", serde_json::json!(true))
+    .with_evidence(
+        "stop_reason",
+        serde_json::json!(outcome.stop_reason.clone()),
+    );
+    if let Some(usage) = outcome.usage_evidence() {
+        stage = stage.with_evidence("usage", usage);
+    }
+    Ok(stage)
+}
+
+/// Stage: streaming chat completion.
+///
+/// The Antigravity runtime delivers `generateContent` as a single response that
+/// jcode re-emits as text deltas, so we assert the runtime produced streamed
+/// text and reached a clean end-of-message rather than requiring many deltas.
+pub async fn run_live_antigravity_native_stream_smoke(
+    model: &str,
+) -> anyhow::Result<crate::live_tests::LiveVerificationStage> {
+    let started = std::time::Instant::now();
+    let provider = build_native_antigravity_provider(model)?;
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "Without using any tools, write the numbers 1 through 5, each on its own \
+                   line, then write STREAM_TEST_OK on the final line. Respond with plain text \
+                   only and do not call any tool."
+                .to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+    let system = "You are a live provider streaming smoke test. Follow the instructions exactly \
+                  and never call a tool; reply with plain streamed text only.";
+
+    const MAX_ATTEMPTS: usize = 3;
+    let mut outcome = NativeClaudeStreamOutcome::default();
+    let mut attempts = 0usize;
+    let mut last_err: Option<String> = None;
+    while attempts < MAX_ATTEMPTS {
+        attempts += 1;
+        let candidate = consume_native_stream(
+            &provider,
+            &messages,
+            &[],
+            system,
+            std::time::Duration::from_secs(120),
+        )
+        .await?;
+
+        let ok = candidate.saw_message_end
+            && candidate.chunk_count > 0
+            && candidate.text.contains("STREAM_TEST_OK");
+        outcome = candidate;
+        if ok {
+            break;
+        }
+        last_err = Some(format!(
+            "attempt {attempts}/{MAX_ATTEMPTS}: {}",
+            outcome.diagnostics()
+        ));
+    }
+
+    ensure!(
+        outcome.saw_message_end,
+        "native Antigravity stream smoke ended without a message_end event ({})",
+        outcome.diagnostics()
+    );
+    ensure!(
+        outcome.chunk_count > 0,
+        "native Antigravity stream smoke produced no streamed text deltas after {attempts} attempt(s) ({}); last: {}",
+        outcome.diagnostics(),
+        last_err.as_deref().unwrap_or("n/a")
+    );
+    ensure!(
+        outcome.text.contains("STREAM_TEST_OK"),
+        "native Antigravity stream smoke returned unexpected content: {:?} ({})",
+        crate::util::truncate_str(outcome.text.trim(), 200),
+        outcome.diagnostics()
+    );
+
+    let mut stage = crate::live_tests::LiveVerificationStage::passed(
+        crate::live_tests::checkpoints::STREAMING_CHAT_COMPLETION,
+    )
+    .with_duration_ms(started.elapsed().as_millis() as u64)
+    .with_evidence("model", serde_json::json!(model))
+    .with_evidence("chunk_count", serde_json::json!(outcome.chunk_count))
+    .with_evidence("attempts", serde_json::json!(attempts))
+    .with_evidence("total_events", serde_json::json!(outcome.total_events))
+    .with_evidence("matched_expected_content", serde_json::json!(true))
+    .with_evidence(
+        "stop_reason",
+        serde_json::json!(outcome.stop_reason.clone()),
+    );
+    if let Some(usage) = outcome.usage_evidence() {
+        stage = stage.with_evidence("usage", usage);
+    }
+    Ok(stage)
+}
+
+/// Stage: tool-call parse + execution loop + result follow-up.
+///
+/// Full two-turn round-trip: ask the model to call a tool (assert a parseable
+/// tool_use), then feed a synthetic tool_result back (assert the model consumes
+/// it). Gemini-3 attaches a `thought_signature` to its function call that the
+/// Cloud Code backend requires replayed on the follow-up turn, so we carry it
+/// onto the assistant tool_use block. Evidence for the `tool_call_parse`,
+/// `tool_execution_loop`, `tool_result_followup`, and `real_jcode_tool_smoke`
+/// checkpoints.
+pub async fn run_live_antigravity_native_tool_smoke(
+    model: &str,
+) -> anyhow::Result<crate::live_tests::LiveVerificationStage> {
+    let started = std::time::Instant::now();
+    let provider = build_native_antigravity_provider(model)?;
+
+    let tool_name = "read";
+    let tools = vec![ToolDefinition {
+        name: tool_name.to_string(),
+        description: "Reads a file from the local filesystem.".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {"file_path": {"type": "string"}},
+            "required": ["file_path"],
+            "additionalProperties": false
+        }),
+    }];
+    let system = "You are a live provider tool smoke test. When asked to read a file, you MUST \
+                  call the read tool with the given path. Do not answer in text first.";
+
+    let first_turn = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "Read the file at /tmp/auth_tool_probe.txt using the read tool. \
+                   Call the tool now; do not answer in text."
+                .to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+
+    let first = consume_native_stream(
+        &provider,
+        &first_turn,
+        &tools,
+        system,
+        std::time::Duration::from_secs(120),
+    )
+    .await?;
+
+    ensure!(
+        !first.tool_calls.is_empty(),
+        "native Antigravity tool smoke produced no tool call (stop_reason={:?}, text={:?})",
+        first.stop_reason,
+        crate::util::truncate_str(first.text.trim(), 200)
+    );
+    let tool_call = first.tool_calls[0].clone();
+    ensure!(
+        tool_call.name == tool_name,
+        "native Antigravity tool smoke called unexpected tool {:?} (expected {tool_name})",
+        tool_call.name
+    );
+    let parsed_arguments = crate::message::ToolCall::parse_streamed_input_to_object(
+        if tool_call.input_json.trim().is_empty() {
+            "{}"
+        } else {
+            tool_call.input_json.trim()
+        },
+    );
+    ensure!(
+        parsed_arguments.is_object(),
+        "native Antigravity tool smoke produced non-object tool arguments: {:?}",
+        tool_call.input_json
+    );
+
+    // Second turn: replay the assistant's tool_use (carrying the Gemini-3
+    // thought signature, required by the Cloud Code backend) and answer it with
+    // a synthetic tool_result, then assert the model consumes the result.
+    let mut followup = first_turn.clone();
+    followup.push(Message {
+        role: Role::Assistant,
+        content: vec![ContentBlock::ToolUse {
+            id: tool_call.id.clone(),
+            name: tool_call.name.clone(),
+            input: parsed_arguments.clone(),
+            thought_signature: tool_call.thought_signature.clone(),
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    });
+    followup.push(Message {
+        role: Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: tool_call.id.clone(),
+            content: "TOOL_RESULT_TOKEN=42. Report this token back to confirm you read it."
+                .to_string(),
+            is_error: Some(false),
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    });
+
+    let second = consume_native_stream(
+        &provider,
+        &followup,
+        &tools,
+        system,
+        std::time::Duration::from_secs(120),
+    )
+    .await?;
+
+    ensure!(
+        second.saw_message_end,
+        "native Antigravity tool follow-up ended without a message_end event"
+    );
+    ensure!(
+        second.text.contains("42"),
+        "native Antigravity tool follow-up did not reflect the tool result token: {:?}",
+        crate::util::truncate_str(second.text.trim(), 200)
+    );
+
+    let total_input = first.input_tokens + second.input_tokens;
+    let total_output = first.output_tokens + second.output_tokens;
+    let mut stage = crate::live_tests::LiveVerificationStage::passed(
+        crate::live_tests::checkpoints::TOOL_CALL_PARSE,
+    )
+    .with_duration_ms(started.elapsed().as_millis() as u64)
+    .with_evidence("model", serde_json::json!(model))
+    .with_evidence("tool_name", serde_json::json!(tool_call.name))
+    .with_evidence("tool_arguments", parsed_arguments)
+    .with_evidence(
+        "thought_signature_present",
+        serde_json::json!(tool_call.thought_signature.is_some()),
+    )
+    .with_evidence("followup_consumed_result", serde_json::json!(true));
     if total_input != 0 || total_output != 0 {
         stage = stage.with_evidence("usage", usage_evidence(total_input, total_output, 0, 0));
     }
