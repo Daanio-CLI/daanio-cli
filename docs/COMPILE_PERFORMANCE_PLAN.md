@@ -1112,12 +1112,39 @@ crate and everything downstream, turning a 0.4s no-op into a full-chain rebuild.
 Proven back-to-back: build #2 (idle) = **0.4s**; build #3, after a sibling
 session touched `inline_interactive.rs` / `info_widget_stability.rs`, = **46.6s**.
 
-### The fix (workflow, not config)
+### Correction: the shared-worktree model is intended, and it works
 
-Heavy or parallel agent work should run in a **separate `git worktree` with its
-own `target/` dir**, not piled into the shared root worktree. Each worktree then
-has a stable incremental cache and idle no-ops stay at ~0.4s, instead of agents
-cross-invalidating each other into repeated full-chain rebuilds. (This is exactly
-how the base-split experiment above was run — isolated worktree, isolated cache.)
+The 46s "no-op" above is **not a cache bug** — it is the shared-build model doing
+its job. When several agents work in the **same** worktree they share one
+`target/selfdev` dir, so:
 
-No config change is warranted; the caching itself is already optimal.
+- Agent A edits a file and builds -> `target/selfdev` now contains A's change.
+- Agent B builds -> cargo correctly rebuilds only the crates A touched (B's binary
+  must include A's edit) and reuses everything else. B is *consuming A's
+  compilation*, which is the goal: "one agent compiles, everyone benefits."
+
+Putting agents in separate worktrees would be **worse** for that goal (no
+sharing at all). The selfdev build system reinforces sharing with cross-session
+**dedup**: `build_dedupe_key = worktree_scope : source_fingerprint : command`.
+If agent B requests a build while A is already building the same source state, B
+*attaches* to A's in-flight build instead of launching a second one.
+
+### The one real rule for keeping the shared cache efficient
+
+The `target/selfdev` fingerprint **includes RUSTFLAGS**, and both `-Zthreads` and
+`-fuse-ld=mold` are part of it (measured: changing either forces a full ~2.5 min
+rebuild and leaves a competing artifact set). So the shared cache only stays warm
+if **every** build of the selfdev profile uses **identical flags**:
+
+- `selfdev build` always routes through `scripts/dev_cargo.sh`, which injects the
+  standard `-Zthreads=4 + mold` flags. All agents using it share perfectly
+  (idle no-op ~1s). ✓
+- A bare `cargo build --profile selfdev` (bypassing `dev_cargo.sh`) uses
+  different flags -> triggers a full rebuild and poisons the shared cache for the
+  next `selfdev build`. **Avoid it.** Always build via `selfdev build` /
+  `dev_cargo.sh`.
+- rust-analyzer uses `target/debug` (a separate dir), so it does **not** poison
+  `target/selfdev`. ✓
+
+No config change is warranted; the caching itself is already optimal. The
+operational rule is simply: every agent builds the same way.
