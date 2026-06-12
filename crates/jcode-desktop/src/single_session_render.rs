@@ -3096,6 +3096,9 @@ fn inline_widget_line_height(
         Some(InlineWidgetKind::SlashSuggestions) => {
             inline_widget_font_size(kind, typography) * typography.meta_line_height
         }
+        Some(InlineWidgetKind::SessionSwitcher) => {
+            inline_widget_font_size(kind, typography) * typography.body_line_height
+        }
         _ => typography.body_size * typography.body_line_height,
     }
 }
@@ -3126,6 +3129,10 @@ fn inline_widget_font_size(
         Some(InlineWidgetKind::SlashSuggestions) => {
             (typography.meta_size * SLASH_SUGGESTIONS_INLINE_FONT_SCALE).max(12.0)
         }
+        // The switcher splits its card into a narrow rail + preview pane;
+        // full body-size text fits so few characters per rail line that
+        // headers wrap and push the session rows out of the card.
+        Some(InlineWidgetKind::SessionSwitcher) => (typography.body_size * 0.72).max(13.0),
         _ => typography.body_size,
     }
 }
@@ -10194,13 +10201,12 @@ pub(crate) fn single_session_text_areas_for_state(
                 - layout.padding_x * 0.85)
                 .min(right as f32)
                 .max(preview_left);
-            let preview_top = (layout.text_top
-                + inline_widget_preview_start_line.unwrap_or(0) as f32
-                    * inline_widget_line_height(inline_widget_kind, &typography))
-            .max(columns.preview.y + 8.0);
-            let preview_bottom = layout
-                .visible_text_bottom
-                .min(columns.preview.y + columns.preview.height - 8.0)
+            // Anchor the preview to the top of its pane. Positioning it at
+            // the "Preview" header's row offset within the combined line
+            // list pushes it below the visible card whenever the session
+            // list is long, leaving the pane empty.
+            let preview_top = columns.preview.y + 8.0;
+            let preview_bottom = (columns.preview.y + columns.preview.height - 8.0)
                 .min(draft_top)
                 .max(preview_top + 1.0);
             if preview_right > preview_left {

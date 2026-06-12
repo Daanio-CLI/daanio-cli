@@ -6423,29 +6423,27 @@ fn session_switcher_styled_lines(
     } else {
         format!("filter {}", switcher.filter.trim())
     };
-    let selected_label = switcher
-        .selected_session()
-        .map(|session| compact_tool_text(&session.title, 44))
-        .unwrap_or_else(|| "no session selected".to_string());
     let mut lines = vec![
         styled_line(
             format!("Resume sessions · {session_count} sessions · {filter_label}"),
             SingleSessionLineStyle::OverlayTitle,
         ),
         styled_line(
-            "Type to filter · Up/Down select · Tab or Left/Right preview · PageUp/PageDown scroll · Enter resume here · Ctrl+Enter open terminal · Esc close",
+            "type filter · ↑/↓ · Tab preview · Enter resume · Esc",
             SingleSessionLineStyle::Overlay,
         ),
         styled_line(
+            // Kept to one short line: the selected row is already highlighted
+            // in the list, and long header text wraps inside the narrow rail
+            // and pushes the session rows out of the visible card.
             format!(
-                "selected: {} · filter: {} · focus: {}",
-                selected_label,
-                if switcher.filter.is_empty() {
-                    "<none>"
-                } else {
-                    switcher.filter.as_str()
-                },
+                "focus: {}{}",
                 session_switcher_focus_label(switcher.focus),
+                if switcher.filter.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · filter: {}", switcher.filter.as_str())
+                },
             ),
             SingleSessionLineStyle::Meta,
         ),
