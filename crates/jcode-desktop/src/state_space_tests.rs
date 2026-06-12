@@ -27,9 +27,40 @@ use std::time::{Duration, Instant};
 use winit::dpi::PhysicalSize;
 
 const WALK_SIZE: PhysicalSize<u32> = PhysicalSize::new(1280, 800);
+/// Additional sizes exercised by the render oracle to catch layout
+/// panics/overflows that only reproduce at small or narrow windows.
+const RENDER_ORACLE_SIZES: &[PhysicalSize<u32>] = &[
+    PhysicalSize::new(1280, 800),
+    PhysicalSize::new(1000, 720),
+    PhysicalSize::new(640, 400),
+    PhysicalSize::new(320, 240),
+];
 const MAX_DEPTH: usize = 3;
 const MAX_UNIQUE_STATES_PER_SEED: usize = 600;
 const SEED_TIME_BUDGET: Duration = Duration::from_secs(20);
+
+fn env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+}
+
+struct WalkBudget {
+    max_depth: usize,
+    max_unique_states: usize,
+    seed_time_budget: Duration,
+}
+
+fn walk_budget() -> WalkBudget {
+    WalkBudget {
+        max_depth: env_usize("JCODE_WALK_DEPTH", MAX_DEPTH),
+        max_unique_states: env_usize("JCODE_WALK_STATES", MAX_UNIQUE_STATES_PER_SEED),
+        seed_time_budget: Duration::from_secs(
+            env_usize("JCODE_WALK_SECONDS", SEED_TIME_BUDGET.as_secs() as usize) as u64,
+        ),
+    }
+}
 const ESCAPE_RECOVERY_PRESSES: usize = 8;
 const SLOW_TRANSITION_BUDGET: Duration = Duration::from_millis(25);
 const MIN_EXPECTED_VERTICES: usize = 6;
@@ -226,35 +257,48 @@ fn check_render(app: &DesktopApp) -> Vec<String> {
     let DesktopApp::SingleSession(single) = app else {
         return Vec::new();
     };
-    let single = single.clone();
-    let built = catch_unwind(AssertUnwindSafe(|| {
-        build_single_session_vertices(&single, WALK_SIZE, 0.0, 4)
-    }));
-    let vertices = match built {
-        Ok(vertices) => vertices,
-        Err(payload) => {
-            return vec![format!(
-                "vertex build panicked: {}",
-                panic_payload_text(&payload)
-            )];
-        }
-    };
     let mut violations = Vec::new();
-    if vertices.len() < MIN_EXPECTED_VERTICES {
-        violations.push(format!(
-            "vertex build produced only {} vertices (frame likely blank)",
-            vertices.len()
-        ));
-    }
-    for vertex in &vertices {
-        let [x, y] = vertex.position;
-        if !x.is_finite() || !y.is_finite() {
-            violations.push(format!("non-finite vertex position [{x}, {y}]"));
-            break;
+    for &size in RENDER_ORACLE_SIZES {
+        let single = single.clone();
+        let built = catch_unwind(AssertUnwindSafe(|| {
+            build_single_session_vertices(&single, size, 0.0, 4)
+        }));
+        let vertices = match built {
+            Ok(vertices) => vertices,
+            Err(payload) => {
+                violations.push(format!(
+                    "vertex build panicked at {}x{}: {}",
+                    size.width,
+                    size.height,
+                    panic_payload_text(&payload)
+                ));
+                continue;
+            }
+        };
+        if vertices.len() < MIN_EXPECTED_VERTICES {
+            violations.push(format!(
+                "vertex build at {}x{} produced only {} vertices (frame likely blank)",
+                size.width,
+                size.height,
+                vertices.len()
+            ));
         }
-        if vertex.color.iter().any(|channel| !channel.is_finite()) {
-            violations.push(format!("non-finite vertex color {:?}", vertex.color));
-            break;
+        for vertex in &vertices {
+            let [x, y] = vertex.position;
+            if !x.is_finite() || !y.is_finite() {
+                violations.push(format!(
+                    "non-finite vertex position [{x}, {y}] at {}x{}",
+                    size.width, size.height
+                ));
+                break;
+            }
+            if vertex.color.iter().any(|channel| !channel.is_finite()) {
+                violations.push(format!(
+                    "non-finite vertex color {:?} at {}x{}",
+                    vertex.color, size.width, size.height
+                ));
+                break;
+            }
         }
     }
     violations
@@ -319,7 +363,13 @@ struct WalkReport {
     max_transition: Duration,
 }
 
-fn walk_seed(name: &str, seed: DesktopApp, alphabet: &[KeyInput], report: &mut WalkReport) {
+fn walk_seed(
+    name: &str,
+    seed: DesktopApp,
+    alphabet: &[KeyInput],
+    budget: &WalkBudget,
+    report: &mut WalkReport,
+) {
     let started = Instant::now();
     let mut visited: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<(DesktopApp, usize, String)> = VecDeque::new();
@@ -435,10 +485,11 @@ fn walk_seed(name: &str, seed: DesktopApp, alphabet: &[KeyInput], report: &mut W
 #[test]
 fn desktop_state_space_walk_holds_invariants() {
     let alphabet = input_alphabet();
+    let budget = walk_budget();
     let mut report = WalkReport::default();
 
     for (name, seed) in seed_states() {
-        walk_seed(&name, seed, &alphabet, &mut report);
+        walk_seed(&name, seed, &alphabet, &budget, &mut report);
     }
 
     println!(
