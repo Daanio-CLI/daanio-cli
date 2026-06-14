@@ -1448,30 +1448,99 @@ fn detects_anthropic_model_not_found_errors() {
 }
 
 #[test]
-fn anthropic_fallback_skips_tried_models_and_returns_known_id() {
+fn anthropic_fallback_prefers_best_available_and_skips_tried_and_retired() {
     let known = crate::provider::known_anthropic_model_ids();
     assert!(
         !known.is_empty(),
         "expected a non-empty Anthropic model catalog"
     );
 
-    // With nothing tried yet, the first catalog entry is offered.
-    let first = anthropic_fallback_model(&[]).expect("a fallback should exist");
-    assert_eq!(first, known[0]);
-
-    // Once a model is recorded as tried, it must not be offered again
-    // (including its 1M alias / case variants via normalized key matching).
-    let next =
-        anthropic_fallback_model(&[known[0].clone()]).expect("another fallback should exist");
-    assert_ne!(
-        AnthropicProvider::normalized_model_key(&next),
-        AnthropicProvider::normalized_model_key(&known[0]),
+    // With nothing tried, the fallback offers the highest-quality (flagship)
+    // model, NOT merely the first catalog entry. The curated order ranks Opus
+    // ahead of Haiku, so the chosen model must not be a Haiku/retired tier when
+    // a stronger one exists.
+    let first = anthropic_fallback_model(&[], "").expect("a fallback should exist");
+    let first_key = AnthropicProvider::normalized_model_key(&first);
+    assert!(
+        !first_key.contains("haiku"),
+        "fallback must not downgrade to Haiku when a flagship is available, got {first}"
+    );
+    assert!(
+        !anthropic_model_is_retired(&first),
+        "fallback must never pick a retired model, got {first}"
     );
 
-    // Exhausting every known model yields None so the caller surfaces the error.
-    let exhausted = anthropic_fallback_model(&known);
+    // A retired model in `tried` must never be re-offered, and the result must
+    // skip retired families entirely.
+    let next = anthropic_fallback_model(&["claude-fable-5".to_string()], "")
+        .expect("another fallback should exist");
+    assert!(!anthropic_model_is_retired(&next));
+
+    // Exhausting every viable known model yields None.
+    let exhausted = anthropic_fallback_model(&known, "");
     assert!(
         exhausted.is_none(),
         "no fallback should remain once all known models are tried, got {exhausted:?}"
+    );
+}
+
+#[test]
+fn anthropic_fallback_honors_server_recommendation() {
+    // The real 404 body recommends a specific replacement model. We must honor
+    // it over the generic quality ranking.
+    let body = "anthropic api error (404 not found): {\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"claude fable 5 is not available. please use opus 4.8. learn more: https://anthropic.com\"}}";
+    let recommended =
+        anthropic_recommended_model_from_error(body).expect("should parse a recommendation");
+    assert_eq!(
+        AnthropicProvider::normalized_model_key(&recommended),
+        "claude-opus-4-8",
+        "server recommendation 'Opus 4.8' should map to claude-opus-4-8"
+    );
+
+    // The full fallback also returns the recommended model.
+    let fallback = anthropic_fallback_model(&["claude-fable-5".to_string()], body)
+        .expect("a fallback should exist");
+    assert_eq!(
+        AnthropicProvider::normalized_model_key(&fallback),
+        "claude-opus-4-8"
+    );
+
+    // A recommendation pointing at a retired model is ignored (falls through to
+    // quality ranking).
+    let retired_rec = "model x not available. please use fable 5.";
+    assert!(
+        anthropic_recommended_model_from_error(retired_rec).is_none()
+            || !anthropic_model_is_retired(
+                &anthropic_recommended_model_from_error(retired_rec).unwrap()
+            )
+    );
+
+    // No recommendation phrase -> None.
+    assert!(anthropic_recommended_model_from_error("429 too many requests").is_none());
+}
+
+#[test]
+fn anthropic_quality_rank_orders_opus_before_haiku_and_retired_last() {
+    let opus = anthropic_model_quality_rank("claude-opus-4-8");
+    let sonnet = anthropic_model_quality_rank("claude-sonnet-4-6");
+    let haiku = anthropic_model_quality_rank("claude-haiku-4-5");
+    let retired = anthropic_model_quality_rank("claude-fable-5");
+    assert!(
+        opus < sonnet,
+        "Opus should outrank Sonnet ({opus} vs {sonnet})"
+    );
+    assert!(
+        sonnet < haiku,
+        "Sonnet should outrank Haiku ({sonnet} vs {haiku})"
+    );
+    assert!(
+        haiku < retired,
+        "retired models must sort last ({haiku} vs {retired})"
+    );
+    assert_eq!(retired, usize::MAX);
+    // Dated live ids must rank like their canonical base.
+    assert_eq!(
+        anthropic_model_quality_rank("claude-haiku-4-5-20251001"),
+        haiku
     );
 }
