@@ -135,7 +135,13 @@ impl MemoryEntryEmbeddingExt for MemoryEntry {
 
         match crate::embedding::embed(&self.content) {
             Ok(embedding) => {
-                self.embedding = Some(embedding);
+                // Tag with the active local model so dense search only compares
+                // vectors from the same model. Untagged legacy memories are
+                // treated as this same model via effective_embedding_model().
+                self.set_embedding(
+                    Some(embedding),
+                    Some(crate::memory_types::LEGACY_EMBEDDING_MODEL.to_string()),
+                );
                 true
             }
             Err(err) => {
