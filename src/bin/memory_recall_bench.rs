@@ -814,7 +814,10 @@ fn cmd_metrics(args: &[String]) -> Result<()> {
                 .active()
                 .map(|m| {
                     let text = format!("{passage_prefix}{}", m.content);
-                    (m.id.clone(), emb.embed(&text).unwrap_or_default())
+                    let v = emb.embed(&text).unwrap_or_else(|e| {
+                        panic!("alt embedder failed on a memory: {e} (model ONNX output shape likely incompatible with the shared mean-pool path)")
+                    });
+                    (m.id.clone(), v)
                 })
                 .collect()
         }
@@ -1019,6 +1022,23 @@ fn ndcg_at(ranked: &[String], rel: &HashSet<&String>, k: usize) -> f32 {
 
 // ---------------- helpers ----------------
 
+fn cmd_probe(args: &[String]) -> Result<()> {
+    let opts = parse_kv(args);
+    let dir = opts.get("embedder").cloned().expect("--embedder required");
+    let qp = opts.get("query_prefix").cloned().unwrap_or_default();
+    let pp = opts.get("passage_prefix").cloned().unwrap_or_default();
+    let e = jcode::embedding::Embedder::load_from_dir(Path::new(&dir))?;
+    let a = e.embed(&format!("{qp}cargo build profile"))?;
+    let b = e.embed(&format!("{pp}The build uses cargo profile selfdev"))?;
+    let c = e.embed(&format!("{pp}coffee brewing temperature guide"))?;
+    let norm = |v: &[f32]| v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let dot = |x: &[f32], y: &[f32]| x.iter().zip(y).map(|(p, q)| p * q).sum::<f32>();
+    println!("dim={} normA={:.4} normB={:.4} normC={:.4}", a.len(), norm(&a), norm(&b), norm(&c));
+    println!("cos(query,relevant)={:.4} cos(query,unrelated)={:.4}", dot(&a, &b), dot(&a, &c));
+    println!("a[0..8]={:?}", &a[0..8.min(a.len())]);
+    Ok(())
+}
+
 fn read_queries() -> Result<Vec<QueryRecord>> {
     let path = bench_root().join("labels/queries.jsonl");
     let text = std::fs::read_to_string(&path)
@@ -1060,6 +1080,7 @@ fn main() -> Result<()> {
         "pool" => cmd_pool(rest),
         "judge" => cmd_judge(rest),
         "metrics" => cmd_metrics(rest),
+        "probe" => cmd_probe(rest),
         _ => {
             eprintln!(
                 "usage: memory_recall_bench <queries|pool|metrics> [--key=value ...]\n\
