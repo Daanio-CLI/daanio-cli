@@ -250,3 +250,35 @@ These remain as future work, each blocked or deliberately deprioritized:
    GPT-5.5 (`--backend=openai --reasoning=none`) once the OpenAI account quota
    resets, and compare judge agreement against the current Claude-Sonnet gold
    labels. Infrastructure is already in place (Sidecar::with_openai_model).
+
+## Fork-the-judge / KV-reuse reranker (validated design, future)
+
+Idea (user, 2026-06-14): instead of a separate tiny sidecar call for the memory
+rerank, reuse the main agent's warm transcript KV cache and run the reranker as
+a branch off it, so the judge's marginal cost is just the rerank suffix.
+
+Benchmark findings (claude-sonnet-4-6, 28 judged queries, see
+~/jcode-memory-bench/results/BASELINE_SUMMARY.md):
+- Naive (full transcript as the rerank query): QUALITY REGRESSION. recall@5
+  0.81 -> 0.58, precision@5 0.34 -> 0.25. Noise dilutes even a frontier model.
+- prefix_suffix (full transcript as prefix + focused intent appended as a
+  suffix with a "focus on THIS" marker): FULLY RECOVERS quality. recall@5 0.811,
+  precision@5 0.351, MRR 0.784 (>= the shipped focused-query rerank).
+
+Conclusion:
+- The cache-friendly structure (transcript-as-prefix for KV reuse) does NOT cost
+  accuracy *if* the focused rerank instruction is appended as a suffix.
+- SELF-HOSTED (vLLM/SGLang/Ollama): viable + high-quality. Fork the rerank
+  sequence off the agent's warm transcript KV (SGLang fork / RadixAttention),
+  append the focused rerank suffix + candidate list, decode a short ranked list.
+  Near-free, full-model-quality reranking. Good basis for a local/premium memory
+  path. Requires a server that exposes prefix sharing/forking.
+- PROVIDER APIs (default): NOT a cost win (cached-read on a ~50k-token transcript
+  prefix still costs ~10-20x a ~1k focused sidecar prompt, because the big
+  model's per-token rate dominates), but no longer a quality regression. Could be
+  exposed as an opt-in config "rerank with main model + prompt caching" for users
+  who prioritize rerank quality and have caching enabled. Default stays the cheap
+  focused-query sidecar, which wins on both cost and quality on the API path.
+
+Bench repro: `memory_recall_bench metrics --config=llm_rerank
+--query_view=focused|full|prefix_suffix --model=<model>`.
