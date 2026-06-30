@@ -54,3 +54,41 @@ SpringBoard "Open in app?" deep-link confirmation that can't be scripted.
 test`. This harness adds the layer above that: it proves the real SwiftUI app,
 running in a simulator, connects over a real WebSocket and renders a real
 transcript. Together they make client behavior hill-climbable without a device.
+
+## Measuring + improving the UI (efficiency reward)
+
+"This looks ugly" is turned into a single hill-climbable number.
+
+- **`ui_metrics.py`** - pixel-level scorer for one screenshot (space,
+  consistency, legibility, rhythm) with `--annotate` overlays.
+- **`ui_lint.py`** - source-level design-token discipline (hardcoded colors /
+  fonts / off-grid spacing that bypass `Theme`).
+- **`ui_matrix.py`** - renders the app across content scenarios
+  (`empty,short,tool,long,code`) x devices, scores each, reports a mean + worst
+  cell. The mean is the hill to climb.
+- **`reward/`** - the full UX reward framework. 13 scorers across 5 weighted
+  categories (A space .30, B ergonomics .25, C clarity .20, D legibility/a11y
+  .15, E responsiveness .10) aggregate into one 0-100 reward with a
+  worst-category callout. See `reward/REWARD_SPEC.md`.
+
+Typical loop:
+
+```bash
+# 1. capture a screenshot matrix + score it
+python3 ui_matrix.py --json > /tmp/before.json
+python3 -m reward.aggregate --matrix-json /tmp/before.json --out-json /tmp/before_reward.json
+
+# 2. make a UI change, rebuild, re-measure
+python3 ui_matrix.py --json > /tmp/after.json
+python3 -m reward.aggregate --matrix-json /tmp/after.json --out-json /tmp/after_reward.json
+
+# 3. gate: only keep the change if reward did not regress
+python3 -m reward.aggregate --baseline /tmp/before_reward.json --candidate /tmp/after_reward.json
+
+# scorers must stay pure/deterministic:
+python3 -m reward.test_determinism
+```
+
+Adding a category is a one-file drop-in under `reward/scorers/` that satisfies
+the contract (`NAME`, `CATEGORY`, `WEIGHT`, `score(ctx) -> CategoryScore`); the
+aggregator discovers it automatically.
