@@ -8663,30 +8663,5 @@ fn fresh_welcome_inline_widget_gap_for_scale(ui_scale: f32) -> f32 {
     (typography.body_size * 0.58).max(10.0 * ui_scale)
 }
 
-pub(crate) fn single_session_visible_body(
-    app: &SingleSessionApp,
-    size: PhysicalSize<u32>,
-) -> Vec<String> {
-    single_session_visible_styled_body(app, size)
-        .into_iter()
-        .map(|line| line.text)
-        .collect()
-}
-
-pub(crate) fn single_session_visible_styled_body(
-    app: &SingleSessionApp,
-    size: PhysicalSize<u32>,
-) -> Vec<SingleSessionStyledLine> {
-    single_session_visible_styled_body_for_tick(app, size, 0)
-}
-
-pub(crate) fn single_session_visible_styled_body_for_tick(
-    app: &SingleSessionApp,
-    size: PhysicalSize<u32>,
-    tick: u64,
-) -> Vec<SingleSessionStyledLine> {
-    single_session_body_viewport_for_tick(app, size, tick, 0.0).lines
-}
-
 #[cfg(test)]
 mod tests;

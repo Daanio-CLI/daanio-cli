@@ -408,3 +408,28 @@ pub(crate) fn clip_rect_to_vertical_bounds(rect: Rect, top: f32, bottom: f32) ->
 pub(crate) fn text_bounds_bottom(value: f32) -> i32 {
     value.ceil().clamp(0.0, i32::MAX as f32) as i32
 }
+
+pub(crate) fn single_session_visible_body(
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+) -> Vec<String> {
+    single_session_visible_styled_body(app, size)
+        .into_iter()
+        .map(|line| line.text)
+        .collect()
+}
+
+pub(crate) fn single_session_visible_styled_body(
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+) -> Vec<SingleSessionStyledLine> {
+    single_session_visible_styled_body_for_tick(app, size, 0)
+}
+
+pub(crate) fn single_session_visible_styled_body_for_tick(
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    tick: u64,
+) -> Vec<SingleSessionStyledLine> {
+    single_session_body_viewport_for_tick(app, size, tick, 0.0).lines
+}
