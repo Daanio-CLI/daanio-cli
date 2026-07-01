@@ -44,7 +44,9 @@ pub(crate) fn welcome_styled_lines(
     lines
 }
 
-pub(crate) fn welcome_recovery_styled_lines(recovery_session_count: usize) -> Vec<SingleSessionStyledLine> {
+pub(crate) fn welcome_recovery_styled_lines(
+    recovery_session_count: usize,
+) -> Vec<SingleSessionStyledLine> {
     vec![styled_line(
         format!(
             "Found {recovery_session_count} crashed session(s). Press Ctrl+R to open them in new windows."

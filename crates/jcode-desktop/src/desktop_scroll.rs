@@ -125,7 +125,11 @@ pub(crate) struct SingleSessionScrollMotion {
 }
 
 impl SingleSessionScrollMotion {
-    pub(crate) fn frame(&mut self, target_lines: f32, now: Instant) -> SingleSessionScrollMotionFrame {
+    pub(crate) fn frame(
+        &mut self,
+        target_lines: f32,
+        now: Instant,
+    ) -> SingleSessionScrollMotionFrame {
         let target_lines = if target_lines.is_finite() {
             target_lines.max(0.0)
         } else {
@@ -257,7 +261,9 @@ pub(crate) fn single_session_text_buffer_cache_key(
     hasher.finish()
 }
 
-pub(crate) fn single_session_body_text_window_bounds(viewport: &SingleSessionBodyViewport) -> (usize, usize) {
+pub(crate) fn single_session_body_text_window_bounds(
+    viewport: &SingleSessionBodyViewport,
+) -> (usize, usize) {
     let start = viewport
         .start_line
         .saturating_sub(SINGLE_SESSION_BODY_TEXT_WINDOW_BEFORE_LINES);
@@ -346,4 +352,3 @@ impl SingleSessionScrollMetricsCache {
         self.streaming_base_total_lines = 0;
     }
 }
-

@@ -616,12 +616,16 @@ pub(crate) struct WorkspaceVertexBuildParams<'a> {
     pub(crate) space_hold_progress: Option<f32>,
     pub(crate) surface_frames: Option<&'a WorkspaceSurfaceTransitionFrames>,
     pub(crate) exiting_surfaces: &'a HashMap<u64, workspace::Surface>,
-    pub(crate) workspace_panel_cache: Option<&'a HashMap<u64, CachedWorkspaceSingleSessionTextPane>>,
+    pub(crate) workspace_panel_cache:
+        Option<&'a HashMap<u64, CachedWorkspaceSingleSessionTextPane>>,
     pub(crate) status_color: [f32; 4],
     pub(crate) status_text_frame: Option<&'a StatusTextTransitionFrame>,
 }
 
-pub(crate) fn build_vertices_into(params: WorkspaceVertexBuildParams<'_>, vertices: &mut Vec<Vertex>) {
+pub(crate) fn build_vertices_into(
+    params: WorkspaceVertexBuildParams<'_>,
+    vertices: &mut Vec<Vertex>,
+) {
     let WorkspaceVertexBuildParams {
         workspace,
         size,
@@ -823,7 +827,11 @@ pub(crate) fn push_workspace_exiting_surfaces(
     }
 }
 
-pub(crate) fn push_space_hold_progress(vertices: &mut Vec<Vertex>, progress: f32, size: PhysicalSize<u32>) {
+pub(crate) fn push_space_hold_progress(
+    vertices: &mut Vec<Vertex>,
+    progress: f32,
+    size: PhysicalSize<u32>,
+) {
     let width = size.width as f32;
     let bar_width = (width * SPACE_HOLD_PROGRESS_WIDTH_FRACTION).clamp(120.0, 460.0);
     let rect = Rect {
@@ -1004,4 +1012,3 @@ pub(crate) fn workspace_status_bar_target_color(workspace: &Workspace) -> [f32; 
         InputMode::Insert => INSERT_STATUS_COLOR,
     }
 }
-

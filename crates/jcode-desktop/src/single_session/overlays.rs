@@ -448,7 +448,10 @@ impl SingleSessionApp {
         }
     }
 
-    pub(crate) fn handle_session_switcher_preview_key(&mut self, key: &KeyInput) -> Option<KeyOutcome> {
+    pub(crate) fn handle_session_switcher_preview_key(
+        &mut self,
+        key: &KeyInput,
+    ) -> Option<KeyOutcome> {
         match key {
             KeyInput::Character(text) if text == "j" => {
                 if self.session_switcher.focus == SessionSwitcherPane::Preview {

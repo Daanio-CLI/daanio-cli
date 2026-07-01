@@ -331,7 +331,9 @@ pub(crate) fn session_switcher_preview_lines_for_session(
     lines
 }
 
-pub(crate) fn session_switcher_preview_line_count_for_session(session: &workspace::SessionCard) -> usize {
+pub(crate) fn session_switcher_preview_line_count_for_session(
+    session: &workspace::SessionCard,
+) -> usize {
     let mut count = 2;
     if !session.subtitle.is_empty() {
         count += 1;
@@ -484,7 +486,9 @@ pub(crate) fn session_switcher_token_fuzzy_score(needle: &str, haystack: &str) -
     Some(score)
 }
 
-pub(crate) fn session_info_inline_styled_lines(app: &SingleSessionApp) -> Vec<SingleSessionStyledLine> {
+pub(crate) fn session_info_inline_styled_lines(
+    app: &SingleSessionApp,
+) -> Vec<SingleSessionStyledLine> {
     let (user_count, assistant_count, tool_count, system_count, meta_count) =
         session_message_role_counts(&app.messages);
     let session_id = app
@@ -664,7 +668,9 @@ pub(crate) fn session_message_role_counts(
     (user, assistant, tool, system, meta)
 }
 
-pub(crate) fn model_picker_inline_styled_lines(picker: &ModelPickerState) -> Vec<SingleSessionStyledLine> {
+pub(crate) fn model_picker_inline_styled_lines(
+    picker: &ModelPickerState,
+) -> Vec<SingleSessionStyledLine> {
     let visible = picker.filtered_indices();
     let count = if visible.len() == picker.choices.len() {
         format!("{} models", picker.choices.len())
@@ -799,7 +805,11 @@ pub(crate) fn model_picker_inline_line_count(picker: &ModelPickerState) -> usize
     count + 1
 }
 
-pub(crate) fn row_window_bounds(visible_len: usize, selected: usize, limit: usize) -> (usize, usize) {
+pub(crate) fn row_window_bounds(
+    visible_len: usize,
+    selected: usize,
+    limit: usize,
+) -> (usize, usize) {
     if visible_len == 0 || limit == 0 {
         return (0, 0);
     }
@@ -852,7 +862,10 @@ pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
     format!("{}…", text.chars().take(max_chars - 1).collect::<String>())
 }
 
-pub(crate) fn model_picker_current_label(provider_name: Option<&str>, current_model: Option<&str>) -> String {
+pub(crate) fn model_picker_current_label(
+    provider_name: Option<&str>,
+    current_model: Option<&str>,
+) -> String {
     match (provider_name, current_model) {
         (Some(provider), Some(model)) if !provider.is_empty() => format!("{provider} · {model}"),
         (_, Some(model)) => model.to_string(),

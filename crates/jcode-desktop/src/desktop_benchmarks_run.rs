@@ -610,8 +610,6 @@ pub(crate) fn run_resize_render_benchmark(frames: usize) -> Result<()> {
     Ok(())
 }
 
-
-
 pub(crate) fn run_stream_e2e_benchmark(raw_events: usize) -> Result<()> {
     let result = run_desktop_stream_end_to_end_benchmark(raw_events);
     println!(
@@ -754,7 +752,9 @@ impl DesktopStreamEndToEndBenchmark {
     }
 }
 
-pub(crate) fn run_desktop_stream_end_to_end_benchmark(raw_events: usize) -> DesktopStreamEndToEndBenchmark {
+pub(crate) fn run_desktop_stream_end_to_end_benchmark(
+    raw_events: usize,
+) -> DesktopStreamEndToEndBenchmark {
     let raw_events = raw_events.max(1);
     let (tx, rx) = mpsc::channel();
     for index in 0..raw_events {
@@ -842,4 +842,3 @@ pub(crate) fn run_desktop_stream_end_to_end_benchmark(raw_events: usize) -> Desk
         stream_left_queued_after_first_batch,
     }
 }
-

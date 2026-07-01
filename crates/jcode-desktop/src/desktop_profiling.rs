@@ -103,7 +103,11 @@ pub(crate) fn log_desktop_preferences_save_profile(
     );
 }
 
-pub(crate) fn log_desktop_crashed_sessions_restore_profile(restored: usize, errors: usize, elapsed: Duration) {
+pub(crate) fn log_desktop_crashed_sessions_restore_profile(
+    restored: usize,
+    errors: usize,
+    elapsed: Duration,
+) {
     if elapsed < Duration::from_millis(40) && errors == 0 {
         return;
     }
@@ -485,7 +489,11 @@ impl DesktopNoPaintWatchdog {
         self.last_redraw_request_at = None;
     }
 
-    pub(crate) fn observe_active_tick(&mut self, now: Instant, context: NoPaintWatchdogContext) -> bool {
+    pub(crate) fn observe_active_tick(
+        &mut self,
+        now: Instant,
+        context: NoPaintWatchdogContext,
+    ) -> bool {
         if !self.enabled {
             return false;
         }

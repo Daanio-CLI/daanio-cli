@@ -7,7 +7,9 @@ pub(crate) struct StreamingTextArrivalStyle {
     pub(crate) active: bool,
 }
 
-pub(crate) fn streaming_text_arrival_style_for_elapsed(elapsed: Duration) -> StreamingTextArrivalStyle {
+pub(crate) fn streaming_text_arrival_style_for_elapsed(
+    elapsed: Duration,
+) -> StreamingTextArrivalStyle {
     if animation::desktop_reduced_motion_enabled() {
         return StreamingTextArrivalStyle {
             opacity: 1.0,
@@ -66,7 +68,9 @@ pub(crate) fn streaming_text_fade_start_after_len_change(
     }
 }
 
-pub(crate) fn streaming_text_handoff_style_for_elapsed(elapsed: Duration) -> StreamingTextArrivalStyle {
+pub(crate) fn streaming_text_handoff_style_for_elapsed(
+    elapsed: Duration,
+) -> StreamingTextArrivalStyle {
     if animation::desktop_reduced_motion_enabled() {
         return StreamingTextArrivalStyle {
             opacity: 0.0,
@@ -211,4 +215,3 @@ pub(crate) const STATUS_PREVIEW_ACCENTS: [[f32; 3]; 8] = [
     [0.720, 0.740, 0.820],
     [0.810, 0.760, 0.520],
 ];
-

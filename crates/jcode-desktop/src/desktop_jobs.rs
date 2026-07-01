@@ -81,7 +81,8 @@ impl DesktopReasoningEffortRequestQueue {
     }
 }
 
-pub(crate) fn spawn_desktop_reasoning_effort_request_queue() -> Result<DesktopReasoningEffortRequestQueue> {
+pub(crate) fn spawn_desktop_reasoning_effort_request_queue()
+-> Result<DesktopReasoningEffortRequestQueue> {
     let (request_tx, request_rx) = mpsc::channel();
     let latest_generation = Arc::new(AtomicU64::new(0));
     let worker_latest_generation = Arc::clone(&latest_generation);
@@ -171,4 +172,3 @@ pub(crate) fn apply_desktop_reasoning_effort_request(
         ));
     }
 }
-

@@ -49,7 +49,10 @@ impl DesktopReloadWindowPlacement {
         )
     }
 
-    pub(crate) fn apply_to_window_builder(self, mut window_builder: WindowBuilder) -> WindowBuilder {
+    pub(crate) fn apply_to_window_builder(
+        self,
+        mut window_builder: WindowBuilder,
+    ) -> WindowBuilder {
         window_builder = window_builder.with_inner_size(self.inner_size);
         if let Some(position) = self.position {
             window_builder = window_builder.with_position(position);
@@ -387,7 +390,10 @@ impl DesktopHotReloader {
         self.send_app_worker_message(DesktopHostToWorkerMessage::Input(input))
     }
 
-    pub(crate) fn send_app_worker_message(&mut self, message: DesktopHostToWorkerMessage) -> Result<()> {
+    pub(crate) fn send_app_worker_message(
+        &mut self,
+        message: DesktopHostToWorkerMessage,
+    ) -> Result<()> {
         let Some(worker) = self.app_worker.as_mut() else {
             return Ok(());
         };
@@ -623,7 +629,10 @@ impl DesktopRelaunch {
         })
     }
 
-    pub(crate) fn spawn_for_window(&self, window: &Window) -> Result<Option<DesktopReloadHandoffWatcher>> {
+    pub(crate) fn spawn_for_window(
+        &self,
+        window: &Window,
+    ) -> Result<Option<DesktopReloadHandoffWatcher>> {
         let handoff = match DesktopReloadHandoff::new(window) {
             Ok(handoff) => Some(handoff),
             Err(error) => {
@@ -779,7 +788,10 @@ pub(crate) fn desktop_reload_binary_candidate(invoked_binary: &Path) -> PathBuf 
     desktop_reload_binary_candidate_from(invoked_binary, &repo_dir)
 }
 
-pub(crate) fn desktop_reload_binary_candidate_from(invoked_binary: &Path, repo_dir: &Path) -> PathBuf {
+pub(crate) fn desktop_reload_binary_candidate_from(
+    invoked_binary: &Path,
+    repo_dir: &Path,
+) -> PathBuf {
     let selfdev = desktop_selfdev_binary_path(repo_dir);
     if paths_refer_to_same_file(invoked_binary, &selfdev)
         || binary_is_newer_than(&selfdev, invoked_binary)
@@ -879,4 +891,3 @@ pub(crate) fn resolve_invoked_binary(argv0: &OsString) -> Option<PathBuf> {
 pub(crate) fn show_desktop_reload_notice(app: &mut DesktopApp) {
     app.set_single_session_status_label("desktop UI reloaded");
 }
-

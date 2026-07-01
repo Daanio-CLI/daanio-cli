@@ -142,7 +142,10 @@ pub(crate) fn format_tool_header_line(header: &ToolHeader) -> String {
     format_tool_header_line_with_metadata(header, &[])
 }
 
-pub(crate) fn format_tool_header_line_with_metadata(header: &ToolHeader, metadata_lines: &[String]) -> String {
+pub(crate) fn format_tool_header_line_with_metadata(
+    header: &ToolHeader,
+    metadata_lines: &[String],
+) -> String {
     let icon = match header.state.as_deref() {
         Some("done") => "✓",
         Some("failed") => "✕",

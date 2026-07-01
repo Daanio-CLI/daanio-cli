@@ -119,7 +119,10 @@ pub(crate) fn desktop_mouse_wheel_event(delta: MouseScrollDelta) -> DesktopMouse
     DesktopMouseEvent::Wheel { delta_x, delta_y }
 }
 
-pub(crate) fn forward_app_worker_input(hot_reloader: &mut DesktopHotReloader, input: DesktopInputEvent) {
+pub(crate) fn forward_app_worker_input(
+    hot_reloader: &mut DesktopHotReloader,
+    input: DesktopInputEvent,
+) {
     if let Err(error) = hot_reloader.send_app_worker_input(input) {
         desktop_log::error(format_args!(
             "jcode-desktop: failed to forward input to app worker: {error:#}"
@@ -187,7 +190,9 @@ pub(crate) fn desktop_session_event_to_wire(
     }
 }
 
-pub(crate) fn desktop_session_event_type_name(event: &session_launch::DesktopSessionEvent) -> &'static str {
+pub(crate) fn desktop_session_event_type_name(
+    event: &session_launch::DesktopSessionEvent,
+) -> &'static str {
     match event {
         session_launch::DesktopSessionEvent::Status(_) => "status",
         session_launch::DesktopSessionEvent::SessionStarted { .. } => "session_started",
@@ -215,7 +220,6 @@ pub(crate) fn desktop_session_event_type_name(event: &session_launch::DesktopSes
         session_launch::DesktopSessionEvent::Error(_) => "error",
     }
 }
-
 
 pub(crate) fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
     match key {
@@ -585,8 +589,6 @@ pub(crate) fn desktop_session_event_refreshes_session_card(
     )
 }
 
-
-
 pub(crate) fn desktop_session_event_affects_visible_state(
     event: &session_launch::DesktopSessionEvent,
 ) -> bool {
@@ -604,4 +606,3 @@ pub(crate) fn apply_pending_session_events(
     }
     apply_desktop_session_event_batch(app, events)
 }
-

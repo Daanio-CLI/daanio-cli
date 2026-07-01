@@ -284,7 +284,11 @@ impl SessionSwitcherState {
         self.open_loading_with_filter(current_session_id, String::new(), false);
     }
 
-    pub(crate) fn open_preview_loading(&mut self, current_session_id: Option<&str>, filter: String) {
+    pub(crate) fn open_preview_loading(
+        &mut self,
+        current_session_id: Option<&str>,
+        filter: String,
+    ) {
         self.open_loading_with_filter(current_session_id, filter, true);
     }
 
@@ -426,7 +430,10 @@ impl SessionSwitcherState {
             .collect()
     }
 
-    pub(crate) fn current_visible_position(&self, current_session_id: Option<&str>) -> Option<usize> {
+    pub(crate) fn current_visible_position(
+        &self,
+        current_session_id: Option<&str>,
+    ) -> Option<usize> {
         let current_session_id = current_session_id?;
         self.filtered_indices().iter().position(|index| {
             self.sessions

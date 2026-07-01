@@ -164,7 +164,9 @@ impl RealTranscriptScrollReport {
 
 /// Build a `SingleSessionApp` backed by a full real transcript, exactly the way
 /// the production resume path hydrates one from disk.
-pub(crate) fn real_transcript_scroll_app(transcript: &session_data::BenchmarkTranscript) -> SingleSessionApp {
+pub(crate) fn real_transcript_scroll_app(
+    transcript: &session_data::BenchmarkTranscript,
+) -> SingleSessionApp {
     let mut app = SingleSessionApp::new(None);
     app.apply_resumed_session_transcript(transcript.messages.clone());
     app.set_status_label(format!("real transcript: {}", transcript.title));

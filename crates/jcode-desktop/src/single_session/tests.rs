@@ -96,9 +96,8 @@ fn latest_external_cli_suggestion_uses_newest_candidate_context() {
         context: Some("implement startup continuation suggestions".to_string()),
     };
 
-    let suggestion =
-        latest_external_cli_continuation_suggestion_from_candidates(vec![old, new])
-            .expect("newest external session should produce a suggestion");
+    let suggestion = latest_external_cli_continuation_suggestion_from_candidates(vec![old, new])
+        .expect("newest external session should produce a suggestion");
 
     assert_eq!(
         suggestion,

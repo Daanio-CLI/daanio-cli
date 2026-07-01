@@ -35,9 +35,9 @@ pub(crate) use markdown::*;
 
 mod tool_lines;
 pub(crate) use tool_lines::*;
-mod overlays;
-mod input;
 mod commands;
+mod input;
+mod overlays;
 mod transcript;
 
 pub(crate) const SINGLE_SESSION_FONT_FAMILY: &str = "JetBrainsMono Nerd Font";
@@ -1517,7 +1517,6 @@ impl SingleSessionApp {
             && !self.session_switcher.open
             && self.stdin_response.is_none()
     }
-
 }
 
 fn styled_line(text: impl Into<String>, style: SingleSessionLineStyle) -> SingleSessionStyledLine {

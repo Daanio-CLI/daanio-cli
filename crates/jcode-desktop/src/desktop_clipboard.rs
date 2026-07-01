@@ -86,7 +86,10 @@ pub(crate) fn copy_text_to_clipboard(
     }
 }
 
-pub(crate) fn paste_clipboard_into_app(clipboard: &mut DesktopClipboard, app: &mut DesktopApp) -> Result<()> {
+pub(crate) fn paste_clipboard_into_app(
+    clipboard: &mut DesktopClipboard,
+    app: &mut DesktopApp,
+) -> Result<()> {
     match clipboard_text(clipboard) {
         Ok(text) => {
             if paste_clipboard_text(app, &text) || !app.accepts_clipboard_image_paste() {
@@ -125,7 +128,9 @@ pub(crate) fn normalize_clipboard_text(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-pub(crate) fn clipboard_image_png_base64(clipboard: &mut DesktopClipboard) -> Result<(String, String)> {
+pub(crate) fn clipboard_image_png_base64(
+    clipboard: &mut DesktopClipboard,
+) -> Result<(String, String)> {
     let image = clipboard.get_image()?;
     let width = u32::try_from(image.width).context("clipboard image is too wide")?;
     let height = u32::try_from(image.height).context("clipboard image is too tall")?;
@@ -145,4 +150,3 @@ pub(crate) fn clipboard_image_png_base64(clipboard: &mut DesktopClipboard) -> Re
 pub(crate) fn clipboard_text(clipboard: &mut DesktopClipboard) -> Result<String> {
     clipboard.get_text()
 }
-

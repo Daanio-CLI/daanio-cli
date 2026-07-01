@@ -770,7 +770,12 @@ impl SingleSessionApp {
         self.tool.event_sequence
     }
 
-    pub(crate) fn start_tool_run(&mut self, id: Option<String>, name: &str, message_index: usize) -> String {
+    pub(crate) fn start_tool_run(
+        &mut self,
+        id: Option<String>,
+        name: &str,
+        message_index: usize,
+    ) -> String {
         let sequence = self.next_tool_event_sequence();
         let call_id =
             normalized_tool_call_id(id).unwrap_or_else(|| format!("desktop-tool-{sequence}"));
@@ -915,7 +920,10 @@ impl SingleSessionApp {
         }
     }
 
-    pub(crate) fn tool_run_for_message_index(&self, message_index: usize) -> Option<&SingleSessionToolRun> {
+    pub(crate) fn tool_run_for_message_index(
+        &self,
+        message_index: usize,
+    ) -> Option<&SingleSessionToolRun> {
         self.tool
             .runs
             .iter()

@@ -52,7 +52,6 @@ pub(crate) use desktop_jobs::*;
 mod desktop_capture;
 pub(crate) use desktop_capture::*;
 mod streaming_text_style;
-pub(crate) use streaming_text_style::*;
 use ab_glyph::{Font, FontArc, Glyph as AbGlyph, PxScale, ScaleFont, point};
 use animation::{
     APP_MODE_TRANSITION_DURATION, AnimatedRect, AnimatedViewport, ColorTransition, FocusPulse,
@@ -108,6 +107,7 @@ use single_session::{
     single_session_typography, single_session_typography_for_scale,
 };
 use single_session_render::*;
+pub(crate) use streaming_text_style::*;
 use wgpu::{CompositeAlphaMode, PresentMode, SurfaceError, TextureUsages};
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
@@ -1937,8 +1937,6 @@ fn save_desktop_preferences_off_ui_thread(
     );
 }
 
-
-
 enum DesktopUserEvent {
     CanvasReady(Box<DesktopCanvasInitResult>),
     SessionEvents(DesktopSessionEventBatch),
@@ -2037,8 +2035,6 @@ enum DesktopSessionCardsPurpose {
     SingleSessionSwitcher,
 }
 
-
-
 fn create_desktop_font_system() -> FontSystem {
     let mut font_system = FontSystem::new();
     font_system
@@ -2131,7 +2127,6 @@ async fn request_startup_adapter(
         None => anyhow::bail!("failed to find a compatible GPU adapter"),
     }
 }
-
 
 fn load_desktop_preferences() -> Option<workspace::DesktopPreferences> {
     match desktop_prefs::load_preferences() {
@@ -2502,7 +2497,6 @@ fn desktop_resume_session_id_from_args<'a>(
     None
 }
 
-
 #[allow(clippy::large_enum_variant)]
 enum DesktopApp {
     SingleSession(SingleSessionApp),
@@ -2872,7 +2866,6 @@ impl DesktopApp {
     }
 }
 
-
 impl DesktopAppDriver for DesktopApp {
     type KeyInput = KeyInput;
     type KeyOutcome = KeyOutcome;
@@ -3007,12 +3000,6 @@ fn apply_single_session_error(app: &mut DesktopApp, error: anyhow::Error) {
         "{error:#}"
     )));
 }
-
-
-
-
-
-
 
 fn desktop_build_hash_label() -> &'static str {
     option_env!("JCODE_DESKTOP_GIT_HASH").unwrap_or("unknown")

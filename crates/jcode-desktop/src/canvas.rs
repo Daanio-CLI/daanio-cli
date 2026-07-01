@@ -110,7 +110,11 @@ pub(crate) struct AppModeTransitionState {
 }
 
 impl AppModeTransitionState {
-    pub(crate) fn frame(&mut self, mode: &'static str, now: Instant) -> Option<AppModeTransitionFrame> {
+    pub(crate) fn frame(
+        &mut self,
+        mode: &'static str,
+        now: Instant,
+    ) -> Option<AppModeTransitionFrame> {
         if animation::desktop_reduced_motion_enabled() {
             self.last_mode = Some(mode);
             self.started_at = None;
@@ -293,7 +297,10 @@ pub(crate) struct Canvas {
 }
 
 impl Canvas {
-    pub(crate) async fn new(window: Arc<Window>, startup_trace: DesktopStartupTrace) -> Result<Self> {
+    pub(crate) async fn new(
+        window: Arc<Window>,
+        startup_trace: DesktopStartupTrace,
+    ) -> Result<Self> {
         let initial_window_size = window.inner_size();
         let size = non_zero_size(initial_window_size);
         let font_system_loader = Some(spawn_desktop_font_system_loader());
@@ -871,7 +878,11 @@ impl Canvas {
         (start < end).then_some((start, end))
     }
 
-    pub(crate) fn sync_single_session_body_text_scroll(&mut self, start_line: usize, window_start: usize) {
+    pub(crate) fn sync_single_session_body_text_scroll(
+        &mut self,
+        start_line: usize,
+        window_start: usize,
+    ) {
         if self.single_session_body_text_scroll_start == Some(start_line) {
             return;
         }
@@ -996,7 +1007,10 @@ impl Canvas {
         self.streaming_text_needs_prepare = true;
     }
 
-    pub(crate) fn release_streaming_text_renderer_if_idle(&mut self, has_streaming_text_buffer: bool) {
+    pub(crate) fn release_streaming_text_renderer_if_idle(
+        &mut self,
+        has_streaming_text_buffer: bool,
+    ) {
         if !streaming_text_renderer_should_release(
             has_streaming_text_buffer,
             self.streaming_text_renderer.is_some(),
@@ -1109,7 +1123,9 @@ impl Canvas {
         (progress, welcome_hero_reveal_is_active(progress))
     }
 
-    pub(crate) fn render_boot_frame(&mut self) -> std::result::Result<DesktopRenderFrameResult, SurfaceError> {
+    pub(crate) fn render_boot_frame(
+        &mut self,
+    ) -> std::result::Result<DesktopRenderFrameResult, SurfaceError> {
         let mut frame_profile = DesktopFrameProfile::new();
         let frame = self.surface.get_current_texture()?;
         frame_profile.checkpoint("surface_acquire");
@@ -2337,7 +2353,10 @@ pub(crate) fn streaming_text_renderer_should_release(
     !has_streaming_text_buffer && (renderer_live || atlas_live)
 }
 
-pub(crate) fn single_session_caret_visible_for_frame(app: &SingleSessionApp, spinner_tick: u64) -> bool {
+pub(crate) fn single_session_caret_visible_for_frame(
+    app: &SingleSessionApp,
+    spinner_tick: u64,
+) -> bool {
     spinner_tick % 6 < 3 && app.should_draw_composer_caret()
 }
 
@@ -2376,4 +2395,3 @@ pub(crate) struct Rect {
     pub(crate) width: f32,
     pub(crate) height: f32,
 }
-

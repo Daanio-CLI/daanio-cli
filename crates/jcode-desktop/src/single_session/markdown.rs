@@ -27,7 +27,11 @@ pub(crate) fn append_chat_message_lines(
     }
 }
 
-pub(crate) fn append_user_lines(lines: &mut Vec<SingleSessionStyledLine>, turn: usize, content: &str) {
+pub(crate) fn append_user_lines(
+    lines: &mut Vec<SingleSessionStyledLine>,
+    turn: usize,
+    content: &str,
+) {
     let mut content_lines = content.lines();
     let Some(first) = content_lines.next() else {
         return;
@@ -67,7 +71,10 @@ pub(crate) fn append_assistant_lines(lines: &mut Vec<SingleSessionStyledLine>, c
     lines.extend(render_assistant_markdown_lines(content));
 }
 
-pub(crate) fn append_streaming_assistant_lines(lines: &mut Vec<SingleSessionStyledLine>, content: &str) {
+pub(crate) fn append_streaming_assistant_lines(
+    lines: &mut Vec<SingleSessionStyledLine>,
+    content: &str,
+) {
     lines.extend(render_assistant_markdown_lines(content));
 }
 
@@ -964,7 +971,11 @@ pub(crate) fn bullet_for_depth(depth: usize) -> &'static str {
     }
 }
 
-pub(crate) fn format_table_row(row: &[String], widths: &[usize], alignments: &[Alignment]) -> String {
+pub(crate) fn format_table_row(
+    row: &[String],
+    widths: &[usize],
+    alignments: &[Alignment],
+) -> String {
     let mut rendered = String::new();
     for (column, width) in widths.iter().enumerate() {
         if column > 0 {

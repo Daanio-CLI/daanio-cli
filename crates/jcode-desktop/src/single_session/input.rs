@@ -279,7 +279,11 @@ impl SingleSessionApp {
         self.clear_draft_selection();
     }
 
-    pub(crate) fn draft_byte_index_for_line_col(&self, target_line: usize, target_col: usize) -> usize {
+    pub(crate) fn draft_byte_index_for_line_col(
+        &self,
+        target_line: usize,
+        target_col: usize,
+    ) -> usize {
         let mut line = 0usize;
         let mut line_start = 0usize;
         for (index, ch) in self.draft.char_indices() {

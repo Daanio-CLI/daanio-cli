@@ -144,7 +144,6 @@ pub(crate) fn desktop_help_text() -> String {
     DESKTOP_HELP_LINES.join("\n")
 }
 
-
 /// Request for a headless gallery screenshot capture.
 ///
 /// `--capture-gallery-screens DIR` renders every gallery fixture state to a
@@ -159,7 +158,9 @@ pub(crate) struct GalleryScreenshotCaptureRequest {
     size: Option<PhysicalSize<u32>>,
 }
 
-pub(crate) fn gallery_screenshot_capture_request(args: &[String]) -> Option<GalleryScreenshotCaptureRequest> {
+pub(crate) fn gallery_screenshot_capture_request(
+    args: &[String],
+) -> Option<GalleryScreenshotCaptureRequest> {
     let output_dir = args.iter().enumerate().find_map(|(index, arg)| {
         arg.strip_prefix("--capture-gallery-screens=")
             .map(PathBuf::from)
@@ -243,7 +244,9 @@ pub(crate) fn capture_key_input(name: &str) -> Option<KeyInput> {
     })
 }
 
-pub(crate) async fn run_gallery_screenshot_capture(request: &GalleryScreenshotCaptureRequest) -> Result<()> {
+pub(crate) async fn run_gallery_screenshot_capture(
+    request: &GalleryScreenshotCaptureRequest,
+) -> Result<()> {
     std::fs::create_dir_all(&request.output_dir).with_context(|| {
         format!(
             "failed to create gallery screenshot directory {}",

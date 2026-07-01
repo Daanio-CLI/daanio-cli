@@ -749,7 +749,10 @@ pub(crate) fn create_hero_mask_texture(
     texture
 }
 
-pub(crate) fn hero_mask_quad_vertices(rect: Rect, target_size: PhysicalSize<u32>) -> [HeroMaskVertex; 6] {
+pub(crate) fn hero_mask_quad_vertices(
+    rect: Rect,
+    target_size: PhysicalSize<u32>,
+) -> [HeroMaskVertex; 6] {
     let target_width = target_size.width.max(1) as f32;
     let target_height = target_size.height.max(1) as f32;
     let left = rect.x / target_width * 2.0 - 1.0;
@@ -878,7 +881,10 @@ pub(crate) fn layout_hero_glyphs(
     glyphs
 }
 
-pub(crate) fn hero_glyph_bounds(font: &FontArc, glyphs: &[AbGlyph]) -> Option<(f32, f32, f32, f32)> {
+pub(crate) fn hero_glyph_bounds(
+    font: &FontArc,
+    glyphs: &[AbGlyph],
+) -> Option<(f32, f32, f32, f32)> {
     let mut bounds = None::<(f32, f32, f32, f32)>;
     for glyph in glyphs.iter().cloned() {
         let Some(outlined) = font.outline_glyph(glyph) else {
@@ -930,7 +936,11 @@ pub(crate) fn draw_hero_glyphs(
     }
 }
 
-pub(crate) fn hero_alpha_bounds(glyph_rgba: &[u8], width: u32, height: u32) -> Option<HeroMaskPixelBounds> {
+pub(crate) fn hero_alpha_bounds(
+    glyph_rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> Option<HeroMaskPixelBounds> {
     let mut min_x = width;
     let mut min_y = height;
     let mut max_x = 0;
@@ -1145,4 +1155,3 @@ pub(crate) fn nearest_hero_stroke_progress(
 
     (best_progress, best_distance_sq.sqrt())
 }
-
