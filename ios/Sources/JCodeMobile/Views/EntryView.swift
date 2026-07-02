@@ -7,7 +7,7 @@ struct EmptyTranscript: View {
         VStack(spacing: 16) {
             Image(systemName: "terminal")
                 .font(Theme.icon(40, weight: .light))
-                .foregroundStyle(Theme.mint)
+                .foregroundStyle(Theme.textSecondary)
             Text("Ready when you are")
                 .font(Theme.mono(16, weight: .medium))
                 .foregroundStyle(Theme.textPrimary)

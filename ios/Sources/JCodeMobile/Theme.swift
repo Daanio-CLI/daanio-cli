@@ -34,6 +34,27 @@ extension Color {
     }
 }
 
+/// Runtime safe-area insets of the key window (zero when unavailable).
+///
+/// Home-button devices (iPhone SE class) report a zero bottom inset, so
+/// edge-pinned chrome needs explicit breathing room there; Dynamic Island
+/// devices already get it from the system insets.
+@MainActor
+enum SafeArea {
+    static var top: CGFloat { insets.top }
+    static var bottom: CGFloat { insets.bottom }
+
+    /// Extra padding for chrome pinned to an edge with no system inset.
+    static var compactTopPad: CGFloat { top < 24 ? 12 : 0 }
+    static var compactBottomPad: CGFloat { bottom > 0 ? 0 : 12 }
+
+    private static var insets: UIEdgeInsets {
+        UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets }
+            .first ?? .zero
+    }
+}
+
 /// Card container used across screens.
 struct Card<Content: View>: View {
     @ViewBuilder var content: Content

@@ -43,9 +43,9 @@ struct Composer: View {
             Button(action: onSend) {
                 Image(systemName: "arrow.up")
                     .font(.body.weight(.bold))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(isConnected ? .black : Theme.textSecondary)
                     .frame(width: 44, height: 44)
-                    .background(canSend ? Theme.mint : Theme.surfaceElevated)
+                    .background(isConnected ? Theme.mint : Theme.surfaceElevated)
                     .clipShape(Circle())
             }
             .disabled(!canSend)
@@ -53,6 +53,7 @@ struct Composer: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .padding(.bottom, SafeArea.compactBottomPad)
         .background(Theme.background)
     }
 

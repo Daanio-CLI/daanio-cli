@@ -60,7 +60,7 @@ struct StatusPill: View {
                 .font(Theme.mono(12))
                 .foregroundStyle(Theme.textSecondary)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 20)
         .padding(.vertical, 4)
         .background(Theme.surface)
         .clipShape(Capsule())

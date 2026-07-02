@@ -88,7 +88,7 @@ struct ChatView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.session.sessionTitle ?? model.activeServer?.serverName ?? "jcode")
                     .font(Theme.mono(16, weight: .semibold))
@@ -106,15 +106,19 @@ struct ChatView: View {
             Button {
                 showSettings = true
             } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.title3)
+                Image(systemName: "ellipsis")
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.textSecondary)
                     .frame(width: 44, height: 44)
+                    .background(Theme.surfaceElevated)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Theme.border, lineWidth: 1))
             }
             .accessibilityLabel("Settings")
             .accessibilityHint("Sessions, model, and servers")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .padding(.top, SafeArea.compactTopPad)
     }
 }
