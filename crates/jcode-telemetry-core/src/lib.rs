@@ -1662,6 +1662,16 @@ pub fn record_token_usage(
 }
 
 pub fn record_error(category: ErrorCategory) {
+    /// Per-session ceiling for each error counter. A runaway retry loop once
+    /// logged 18k+ auth failures in one session, which distorted daily sums
+    /// (one session looked like a fleet-wide auth outage). Past a few hundred
+    /// occurrences the count carries no extra diagnostic signal, only skew.
+    const ERROR_COUNT_SESSION_CAP: u32 = 500;
+
+    fn capped_increment(counter: &mut u32) {
+        *counter = counter.saturating_add(1).min(ERROR_COUNT_SESSION_CAP);
+    }
+
     if let Ok(mut guard) = SESSION_STATE.lock()
         && let Some(ref mut state) = *guard
     {
@@ -1671,19 +1681,19 @@ pub fn record_error(category: ErrorCategory) {
         }
         match category {
             ErrorCategory::ProviderTimeout => {
-                state.error_provider_timeout = state.error_provider_timeout.saturating_add(1);
+                capped_increment(&mut state.error_provider_timeout);
             }
             ErrorCategory::AuthFailed => {
-                state.error_auth_failed = state.error_auth_failed.saturating_add(1);
+                capped_increment(&mut state.error_auth_failed);
             }
             ErrorCategory::ToolError => {
-                state.error_tool_error = state.error_tool_error.saturating_add(1);
+                capped_increment(&mut state.error_tool_error);
             }
             ErrorCategory::McpError => {
-                state.error_mcp_error = state.error_mcp_error.saturating_add(1);
+                capped_increment(&mut state.error_mcp_error);
             }
             ErrorCategory::RateLimited => {
-                state.error_rate_limited = state.error_rate_limited.saturating_add(1);
+                capped_increment(&mut state.error_rate_limited);
             }
         }
     }

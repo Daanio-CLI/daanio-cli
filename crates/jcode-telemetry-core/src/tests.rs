@@ -94,6 +94,28 @@ fn test_error_counters() {
 }
 
 #[test]
+fn test_error_counter_caps_per_session() {
+    let _guard = lock_telemetry_test_state();
+    if let Ok(mut session) = SESSION_STATE.lock() {
+        *session = None;
+    }
+    begin_session_with_mode("openai", "gpt-5.4", None, false);
+    // A runaway retry loop once logged 18k+ auth failures in one session and
+    // distorted daily aggregates. The counter must saturate at the cap.
+    for _ in 0..600 {
+        record_error(ErrorCategory::AuthFailed);
+    }
+    {
+        let guard = SESSION_STATE.lock().unwrap();
+        let state = guard.as_ref().expect("session telemetry state");
+        assert_eq!(state.error_auth_failed, 500);
+    }
+    if let Ok(mut session) = SESSION_STATE.lock() {
+        *session = None;
+    }
+}
+
+#[test]
 fn test_error_counters_no_session_is_noop() {
     let _guard = lock_telemetry_test_state();
     // Errors recorded with no active session must not bump any counter that a

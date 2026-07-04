@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS events (
     end_reason TEXT,
     auth_provider TEXT,
     auth_method TEXT,
+    -- Failure reason label for onboarding_step step='auth_failed' events
+    -- (classify_auth_failure_message labels, e.g. callback_timeout,
+    -- validation_failed, oauth_rate_limited). Added in migration 0015.
+    auth_failure_reason TEXT,
     from_version TEXT,
     event_id TEXT,
     session_id TEXT,

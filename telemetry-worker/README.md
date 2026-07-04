@@ -98,8 +98,13 @@ wrangler d1 execute jcode-telemetry --command "SELECT provider_end, COUNT(*) as 
 # Average meaningful session duration
 wrangler d1 execute jcode-telemetry --command "SELECT AVG(duration_mins) as avg_mins, AVG(turns) as avg_turns FROM events WHERE event = 'session_end' AND (turns > 0 OR duration_mins > 0 OR error_provider_timeout > 0 OR error_auth_failed > 0 OR error_tool_error > 0 OR error_mcp_error > 0 OR error_rate_limited > 0 OR provider_switches > 0 OR model_switches > 0)"
 
-# Error rates
-wrangler d1 execute jcode-telemetry --command "SELECT SUM(error_provider_timeout) as timeouts, SUM(error_rate_limited) as rate_limits, SUM(error_auth_failed) as auth_failures FROM events WHERE event = 'session_end'"
+# Error rates. Count affected sessions/users, not raw sums: raw sums are
+# dominated by runaway retry loops (one pre-breaker session logged 18k+ auth
+# failures), which makes one broken install look like a fleet-wide outage.
+wrangler d1 execute jcode-telemetry --command "SELECT COUNT(CASE WHEN error_provider_timeout > 0 THEN 1 END) as timeout_sessions, COUNT(CASE WHEN error_rate_limited > 0 THEN 1 END) as rate_limited_sessions, COUNT(CASE WHEN error_auth_failed > 0 THEN 1 END) as auth_failed_sessions, COUNT(DISTINCT CASE WHEN error_auth_failed > 0 THEN telemetry_id END) as auth_failed_users FROM events WHERE event = 'session_end'"
+
+# Auth failure reasons (requires 0015; reasons recorded from explicit auth_failed onboarding steps)
+wrangler d1 execute jcode-telemetry --command "SELECT auth_provider, auth_failure_reason, COUNT(*) AS n, COUNT(DISTINCT telemetry_id) AS users FROM events WHERE event = 'onboarding_step' AND step = 'auth_failed' AND created_at > datetime('now', '-30 days') GROUP BY 1, 2 ORDER BY n DESC"
 
 # Version adoption
 wrangler d1 execute jcode-telemetry --command "SELECT version, COUNT(DISTINCT telemetry_id) as users FROM events GROUP BY version ORDER BY version DESC"

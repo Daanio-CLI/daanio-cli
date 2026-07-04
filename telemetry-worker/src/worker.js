@@ -178,6 +178,7 @@ async function insertEvent(env, body) {
       ["step", body.step || null],
       ["auth_provider", body.auth_provider || null],
       ["auth_method", body.auth_method || null],
+      ["auth_failure_reason", body.auth_failure_reason || null],
       ["milestone_elapsed_ms", body.milestone_elapsed_ms || null],
       ...common,
     ].filter(([name]) => columns.has(name)));
