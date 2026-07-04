@@ -5,6 +5,14 @@ use super::*;
 
 #[async_trait]
 impl Provider for OpenAIProvider {
+    fn credential_mode(&self) -> jcode_provider_core::CredentialMode {
+        self.credential_mode_snapshot()
+    }
+
+    fn set_credential_mode(&self, mode: jcode_provider_core::CredentialMode) -> anyhow::Result<()> {
+        OpenAIProvider::set_credential_mode(self, mode)
+    }
+
     async fn complete(
         &self,
         messages: &[ChatMessage],
