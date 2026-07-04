@@ -1,5 +1,5 @@
 use super::*;
-use crate::message::{ContentBlock, Message, Role};
+use jcode_base::message::{ContentBlock, Message, Role};
 
 struct EnvVarGuard {
     key: &'static str,
@@ -9,19 +9,19 @@ struct EnvVarGuard {
 impl EnvVarGuard {
     fn set_path(key: &'static str, value: &std::path::Path) -> Self {
         let previous = std::env::var_os(key);
-        crate::env::set_var(key, value);
+        jcode_base::env::set_var(key, value);
         Self { key, previous }
     }
 
     fn set_value(key: &'static str, value: &str) -> Self {
         let previous = std::env::var_os(key);
-        crate::env::set_var(key, value);
+        jcode_base::env::set_var(key, value);
         Self { key, previous }
     }
 
     fn unset(key: &'static str) -> Self {
         let previous = std::env::var_os(key);
-        crate::env::remove_var(key);
+        jcode_base::env::remove_var(key);
         Self { key, previous }
     }
 }
@@ -29,9 +29,9 @@ impl EnvVarGuard {
 impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         if let Some(previous) = &self.previous {
-            crate::env::set_var(self.key, previous);
+            jcode_base::env::set_var(self.key, previous);
         } else {
-            crate::env::remove_var(self.key);
+            jcode_base::env::remove_var(self.key);
         }
     }
 }
@@ -120,7 +120,7 @@ fn available_models_display_prefers_discovered_models_and_current_model() {
 
 #[test]
 fn available_models_display_without_discovery_uses_current_model_only() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = jcode_base::storage::lock_test_env();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -135,12 +135,12 @@ fn available_models_display_without_discovery_uses_current_model_only() {
 
 #[test]
 fn available_models_display_seeds_from_persisted_catalog() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = jcode_base::storage::lock_test_env();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
     let path = GeminiProvider::persisted_catalog_path().expect("catalog path");
-    crate::storage::write_json(
+    jcode_base::storage::write_json(
         &path,
         &PersistedCatalog {
             models: vec!["gemini-3-pro-preview".to_string()],
@@ -591,7 +591,7 @@ fn parses_candidate_finish_message() {
 
 #[test]
 fn auth_mode_prefers_api_key_when_present() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = jcode_base::storage::lock_test_env();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let _google = EnvVarGuard::unset("GOOGLE_API_KEY");
@@ -606,7 +606,7 @@ fn auth_mode_prefers_api_key_when_present() {
 
 #[test]
 fn auth_mode_force_oauth_overrides_api_key() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = jcode_base::storage::lock_test_env();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let _google = EnvVarGuard::unset("GOOGLE_API_KEY");
@@ -618,7 +618,7 @@ fn auth_mode_force_oauth_overrides_api_key() {
 
 #[test]
 fn auth_mode_defaults_to_oauth_without_api_key() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = jcode_base::storage::lock_test_env();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let _key = EnvVarGuard::unset("GEMINI_API_KEY");
@@ -630,7 +630,7 @@ fn auth_mode_defaults_to_oauth_without_api_key() {
 
 #[test]
 fn developer_api_base_url_defaults_to_generativelanguage() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = jcode_base::storage::lock_test_env();
     let _endpoint = EnvVarGuard::unset("GEMINI_API_ENDPOINT");
     let _version = EnvVarGuard::unset("GEMINI_API_VERSION");
 
@@ -642,7 +642,7 @@ fn developer_api_base_url_defaults_to_generativelanguage() {
 
 #[test]
 fn developer_api_base_url_honors_env_overrides() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = jcode_base::storage::lock_test_env();
     let _endpoint = EnvVarGuard::set_value("GEMINI_API_ENDPOINT", "https://example.test/");
     let _version = EnvVarGuard::set_value("GEMINI_API_VERSION", "/v9/");
 
