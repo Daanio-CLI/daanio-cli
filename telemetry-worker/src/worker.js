@@ -1,6 +1,46 @@
 let cachedEventColumns = null;
 let cachedSessionDetailColumns = null;
 let cachedTurnDetailColumns = null;
+let cachedWebDetailColumns = null;
+
+// Website beacon events (anonymous visitor_id minted in localStorage). Their
+// web-only fields live in the web_details table (see migration 0016): the
+// events table sits one column shy of D1's 100-column cap, so wide event
+// shapes go in detail tables per the session_details / turn_details pattern.
+const WEB_EVENTS = ["web_pageview", "web_cta_click"];
+
+// Token subscription plan lifecycle events, plus account_linked, the
+// analytics<->account join anchor (telemetry_id + account_id).
+const SUBSCRIPTION_EVENTS = [
+  "subscription_login",
+  "subscription_activated",
+  "subscription_budget_exhausted",
+  "subscription_router_error",
+  "account_linked",
+];
+
+const CLI_EVENTS = [
+  "install",
+  "upgrade",
+  "auth_success",
+  "onboarding_step",
+  "feedback",
+  "session_start",
+  "turn_end",
+  "session_end",
+  "session_crash",
+];
+
+const KNOWN_EVENTS = [...CLI_EVENTS, ...WEB_EVENTS, ...SUBSCRIPTION_EVENTS];
+
+// Origins the website beacon posts from. The default CORS policy stays the
+// permissive ALLOWED_ORIGIN var ("*", telemetry is anonymous and unauthed);
+// allowlisted origins are echoed back explicitly so the policy keeps working
+// if ALLOWED_ORIGIN is ever narrowed.
+const WEB_ALLOWED_ORIGINS = new Set([
+  "https://solosystems.dev",
+  "https://solosystems.pages.dev",
+]);
 
 // ---------------------------------------------------------------------------
 // Self-defense against the D1 size cap.
@@ -96,7 +136,47 @@ const FIREHOSE_SCHEMA = {
   indexes: ["telemetry_id"],
 };
 
+// ---------------------------------------------------------------------------
+// Web/subscription firehose (`jcode_web_firehose` dataset).
+//
+// FIREHOSE_SCHEMA above is append-only AND full: Analytics Engine caps a data
+// point at 20 blobs + 20 doubles, and both arrays are at capacity. The new
+// web/subscription fields therefore live in a second dataset with its own
+// positional schema instead of repurposing existing positions (which would
+// silently corrupt historical queries). Same append-only contract applies
+// here: never reorder or repurpose a position.
+// ---------------------------------------------------------------------------
+const FIREHOSE_WEB_SCHEMA = {
+  // blob1..blob20 (strings); 17 used, 3 free for future appends.
+  blobs: [
+    "event",
+    "version",
+    "os",
+    "arch",
+    "build_channel",
+    "event_id",
+    "session_id",
+    "path",
+    "referrer",
+    "visitor_id",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "cta",
+    "account_id",
+    "tier",
+    "model",
+  ],
+  // double1..double20 (numbers); 1 used, 19 free.
+  doubles: ["is_ci"],
+  // index1 (sampling key): visitor_id for web events, telemetry_id otherwise.
+  indexes: ["visitor_id_or_telemetry_id"],
+};
+
 function writeFirehose(env, body) {
+  if (WEB_EVENTS.includes(body.event) || SUBSCRIPTION_EVENTS.includes(body.event)) {
+    return writeWebFirehose(env, body);
+  }
   if (!env.FIREHOSE || typeof env.FIREHOSE.writeDataPoint !== "function") {
     return false;
   }
@@ -138,11 +218,38 @@ function writeFirehose(env, body) {
   }
 }
 
+function writeWebFirehose(env, body) {
+  const sink = env.FIREHOSE_WEB;
+  if (!sink || typeof sink.writeDataPoint !== "function") {
+    return false;
+  }
+  try {
+    sink.writeDataPoint({
+      indexes: [String(body.visitor_id || body.id || "").slice(0, 96)],
+      blobs: FIREHOSE_WEB_SCHEMA.blobs.map((name) => {
+        const value = body[name];
+        return value == null ? "" : String(value).slice(0, 200);
+      }),
+      doubles: FIREHOSE_WEB_SCHEMA.doubles.map((name) => {
+        if (name === "is_ci") {
+          return boolToInt(body.is_ci);
+        }
+        return Number(body[name]) || 0;
+      }),
+    });
+    return true;
+  } catch (err) {
+    console.warn("web firehose write failed", err?.message || err);
+    return false;
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
+    const cors = corsHeaders(request, env);
     if (request.method === "OPTIONS") {
       return new Response(null, {
-        headers: corsHeaders(),
+        headers: cors,
       });
     }
 
@@ -158,6 +265,7 @@ export default {
         return jsonResponse(
           { ok: false, error: "d1 probe failed", detail: String(err?.message || err) },
           500,
+          cors,
         );
       }
       return jsonResponse({
@@ -166,40 +274,47 @@ export default {
         db_soft_limit_bytes: D1_SOFT_LIMIT_BYTES,
         over_soft_limit: lastObservedDbSizeBytes >= D1_SOFT_LIMIT_BYTES,
         last_emergency_prune_at_ms: lastEmergencyPruneAtMs || null,
-      });
+      }, 200, cors);
     }
 
     if (request.method !== "POST") {
-      return jsonResponse({ error: "Method not allowed" }, 405);
+      return jsonResponse({ error: "Method not allowed" }, 405, cors);
     }
 
     if (url.pathname !== "/v1/event") {
-      return jsonResponse({ error: "Not found" }, 404);
+      return jsonResponse({ error: "Not found" }, 404, cors);
     }
 
     let body;
     try {
       body = await request.json();
     } catch {
-      return jsonResponse({ error: "Invalid JSON" }, 400);
+      return jsonResponse({ error: "Invalid JSON" }, 400, cors);
+    }
+
+    // Web beacon events are normalized before the generic required-field
+    // check: the browser has no version/os/arch, so sensible defaults are
+    // filled in, and the anonymous visitor_id doubles as the telemetry id.
+    if (typeof body.event === "string" && WEB_EVENTS.includes(body.event)) {
+      const problem = normalizeWebEvent(body);
+      if (problem) {
+        return jsonResponse({ error: problem }, 400, cors);
+      }
     }
 
     if (!body.id || !body.event || !body.version || !body.os || !body.arch) {
-      return jsonResponse({ error: "Missing required fields" }, 400);
+      return jsonResponse({ error: "Missing required fields" }, 400, cors);
     }
 
-    if (![
-      "install",
-      "upgrade",
-      "auth_success",
-      "onboarding_step",
-      "feedback",
-      "session_start",
-      "turn_end",
-      "session_end",
-      "session_crash",
-    ].includes(body.event)) {
-      return jsonResponse({ error: "Unknown event type" }, 400);
+    if (!KNOWN_EVENTS.includes(body.event)) {
+      return jsonResponse({ error: "Unknown event type" }, 400, cors);
+    }
+
+    if (SUBSCRIPTION_EVENTS.includes(body.event)) {
+      const problem = normalizeSubscriptionEvent(body);
+      if (problem) {
+        return jsonResponse({ error: problem }, 400, cors);
+      }
     }
 
     // Firehose first: even if D1 is at its size cap, the raw event is
@@ -230,9 +345,9 @@ export default {
     maybeScheduleEmergencyPrune(env, ctx);
 
     if (!durableOk && !firehoseOk) {
-      return jsonResponse({ error: "Internal error" }, 500);
+      return jsonResponse({ error: "Internal error" }, 500, cors);
     }
-    return jsonResponse({ ok: true, durable: durableOk, firehose: firehoseOk });
+    return jsonResponse({ ok: true, durable: durableOk, firehose: firehoseOk }, 200, cors);
   },
 
   // Nightly retention pruning. D1 hard-caps databases at 500 MB; without this
@@ -317,6 +432,11 @@ async function emergencyPrune(env) {
 //   metrics; keep them for 12 months per the documented retention policy.
 // - install and feedback rows are tiny and act as identity/product anchors;
 //   they are never pruned here.
+// - web_pageview is the high-volume website row; keep a 90-day raw tail in D1
+//   (matching firehose retention) and prune beyond it. web_cta_click is the
+//   low-volume conversion anchor; keep 12 months.
+// - subscription_activated and account_linked are identity/revenue anchors and
+//   are never pruned (like install / feedback).
 const RETENTION_DAYS = {
   turn_end: 30,
   session_start: 30,
@@ -325,6 +445,11 @@ const RETENTION_DAYS = {
   auth_success: 180,
   session_end: 365,
   session_crash: 365,
+  web_pageview: 90,
+  web_cta_click: 365,
+  subscription_login: 180,
+  subscription_router_error: 90,
+  subscription_budget_exhausted: 365,
 };
 
 const PRUNE_BATCH_LIMIT = 10000;
@@ -339,6 +464,21 @@ async function pruneOldEvents(env, options = {}) {
     const cutoff = `-${scaledDays} days`;
     while (batchesUsed < maxBatches) {
       batchesUsed += 1;
+      // Delete web_details children first (own try/catch: databases that
+      // predate migration 0016 have no web_details table, and that must not
+      // abort pruning of the event rows themselves).
+      if (WEB_EVENTS.includes(eventType)) {
+        try {
+          await env.DB.prepare(
+            `DELETE FROM web_details WHERE event_id IN (
+               SELECT event_id FROM events
+               WHERE event = ? AND created_at < datetime('now', ?) AND event_id IS NOT NULL
+               LIMIT ?)`
+          ).bind(eventType, cutoff, PRUNE_BATCH_LIMIT).run();
+        } catch (err) {
+          console.warn(`web_details prune failed for ${eventType}`, err?.message || err);
+        }
+      }
       try {
         // Delete detail children first so the events FK never blocks the prune.
         await env.DB.prepare(
@@ -377,6 +517,38 @@ async function insertEvent(env, body) {
   const sessionDetailColumns = await getSessionDetailColumns(env);
   const turnDetailColumns = await getTurnDetailColumns(env);
   const common = commonEventEntries(body, columns);
+
+  if (WEB_EVENTS.includes(body.event)) {
+    const values = [
+      ["telemetry_id", body.id],
+      ["event", body.event],
+      ["version", body.version],
+      ["os", body.os],
+      ["arch", body.arch],
+      ...common,
+    ].filter(([name]) => columns.has(name));
+    const inserted = await insertEventRow(env, body, values);
+    if (inserted) {
+      await insertWebDetails(env, body, await getWebDetailColumns(env));
+    }
+    return;
+  }
+
+  if (SUBSCRIPTION_EVENTS.includes(body.event)) {
+    return insertEventRow(env, body, [
+      ["telemetry_id", body.id],
+      ["event", body.event],
+      ["version", body.version],
+      ["os", body.os],
+      ["arch", body.arch],
+      ["account_id", body.account_id || null],
+      ["tier", body.tier || null],
+      // Subscription events reuse the generic model_start column for the
+      // routed model (new event types; no historical rows are re-read).
+      ["model_start", body.model || null],
+      ...common,
+    ].filter(([name]) => columns.has(name)));
+  }
 
   if (body.event === "install") {
     return insertEventRow(env, body, [
@@ -912,6 +1084,82 @@ async function getTurnDetailColumns(env) {
   return cachedTurnDetailColumns;
 }
 
+async function getWebDetailColumns(env) {
+  if (cachedWebDetailColumns) {
+    return cachedWebDetailColumns;
+  }
+  try {
+    const result = await env.DB.prepare("PRAGMA table_info(web_details)").all();
+    cachedWebDetailColumns = new Set((result.results || []).map((row) => row.name));
+  } catch {
+    cachedWebDetailColumns = new Set();
+  }
+  return cachedWebDetailColumns;
+}
+
+async function insertWebDetails(env, body, columns) {
+  if (!columns || columns.size === 0 || !body.event_id || !columns.has("event_id")) {
+    return;
+  }
+  const values = [
+    ["event_id", body.event_id],
+    ["path", body.path || null],
+    ["referrer", body.referrer || null],
+    ["visitor_id", body.visitor_id || null],
+    ["utm_source", body.utm_source || null],
+    ["utm_medium", body.utm_medium || null],
+    ["utm_campaign", body.utm_campaign || null],
+    ["cta", body.cta || null],
+  ].filter(([name]) => columns.has(name));
+  if (values.length > 1) {
+    await insertDynamic(env, "web_details", values);
+  }
+}
+
+// Normalize a website beacon event in place. Browsers do not send
+// version/os/arch and mint an anonymous visitor_id in localStorage, so the
+// visitor_id doubles as the telemetry id and free-text fields are
+// length-capped (same defensive posture as the firehose blob caps).
+// Returns an error string when the event is invalid, otherwise null.
+function normalizeWebEvent(body) {
+  if (typeof body.visitor_id !== "string" || body.visitor_id.length === 0) {
+    return "Missing visitor_id";
+  }
+  if (typeof body.path !== "string" || body.path.length === 0) {
+    return "Missing path";
+  }
+  if (body.event === "web_cta_click" && (typeof body.cta !== "string" || body.cta.length === 0)) {
+    return "Missing cta";
+  }
+  body.visitor_id = body.visitor_id.slice(0, 96);
+  body.id = body.id || body.visitor_id;
+  body.version = body.version || "web";
+  body.os = body.os || "web";
+  body.arch = body.arch || "web";
+  for (const field of ["path", "referrer", "utm_source", "utm_medium", "utm_campaign", "cta"]) {
+    if (body[field] != null) {
+      body[field] = String(body[field]).slice(0, 200);
+    }
+  }
+  return null;
+}
+
+// Normalize a token-subscription event in place. account_id is required for
+// all of them; account_linked is the analytics<->account join event and also
+// requires the telemetry id. Returns an error string or null.
+function normalizeSubscriptionEvent(body) {
+  if (typeof body.account_id !== "string" || body.account_id.length === 0) {
+    return "Missing account_id";
+  }
+  body.account_id = body.account_id.slice(0, 96);
+  for (const field of ["tier", "model"]) {
+    if (body[field] != null) {
+      body[field] = String(body[field]).slice(0, 200);
+    }
+  }
+  return null;
+}
+
 async function insertDynamic(env, table, entries) {
   const columns = entries.map(([name]) => name);
   const placeholders = columns.map(() => "?").join(", ");
@@ -926,20 +1174,31 @@ function boolToInt(value) {
   return value ? 1 : 0;
 }
 
-function jsonResponse(data, status = 200) {
+function jsonResponse(data, status = 200, cors = null) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json",
-      ...corsHeaders(),
+      ...(cors || corsHeaders()),
     },
   });
 }
 
-function corsHeaders() {
-  return {
-    "Access-Control-Allow-Origin": "*",
+function corsHeaders(request = null, env = null) {
+  // Default policy: ALLOWED_ORIGIN var (currently "*"; telemetry is anonymous
+  // and unauthenticated). Website beacon origins are additionally echoed back
+  // explicitly, so browser preflights keep passing even if ALLOWED_ORIGIN is
+  // ever narrowed away from "*".
+  let allowOrigin = env?.ALLOWED_ORIGIN || "*";
+  const origin = request?.headers?.get?.("Origin");
+  const headers = {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   };
+  if (origin && WEB_ALLOWED_ORIGINS.has(origin)) {
+    allowOrigin = origin;
+    headers["Vary"] = "Origin";
+  }
+  headers["Access-Control-Allow-Origin"] = allowOrigin;
+  return headers;
 }

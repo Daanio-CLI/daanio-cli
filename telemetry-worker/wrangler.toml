@@ -30,5 +30,13 @@ database_id = "abaa524c-3e90-4ba9-a569-027e78a083c6"
 #binding = "FIREHOSE"
 #dataset = "jcode_telemetry_firehose"
 
+# Web/subscription firehose (FIREHOSE_WEB_SCHEMA in src/worker.js). The main
+# FIREHOSE_SCHEMA is at Analytics Engine's 20-blob/20-double capacity, so
+# website + subscription events get their own dataset. Same one-time enable
+# caveat as above; the worker degrades gracefully without the binding.
+#[[analytics_engine_datasets]]
+#binding = "FIREHOSE_WEB"
+#dataset = "jcode_web_firehose"
+
 [vars]
 ALLOWED_ORIGIN = "*"

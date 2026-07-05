@@ -92,6 +92,10 @@ wrangler d1 execute jcode-telemetry --remote --file=migrations/0004_telemetry_ph
 wrangler d1 execute jcode-telemetry --remote --file=migrations/0005_workflow_turn_telemetry.sql
 ```
 
+(...and so on through the latest numbered migration; each also has an
+`npm run migrate:<name>` alias, see Ops helpers below. The newest is
+`migrations/0016_web_subscription_analytics.sql` / `npm run migrate:web-subscription`.)
+
 Then redeploy the worker:
 
 ```bash
@@ -120,10 +124,53 @@ npm run migrate:feedback-text
 npm run migrate:daily-active
 npm run migrate:daily-active-backfill
 npm run migrate:daily-active-ci
+npm run migrate:detail-fields
+npm run migrate:dau-full-backfill
+npm run migrate:auth-failure-reason
+npm run migrate:web-subscription
 
 # Run the health dashboard query
 npm run health
 ```
+
+## Event types
+
+CLI events (sent by jcode itself): `install`, `upgrade`, `auth_success`,
+`onboarding_step`, `feedback`, `session_start`, `turn_end`, `session_end`,
+`session_crash`.
+
+### Website analytics events (migration 0016)
+
+Sent by the beacon on `https://solosystems.dev` (and the
+`https://solosystems.pages.dev` preview). The browser mints an anonymous
+`visitor_id` UUID in localStorage; the worker uses it as the telemetry id and
+fills in `version`/`os`/`arch` defaults, so the beacon payload can stay tiny.
+Web-only fields are stored in the `web_details` table (keyed by `event_id`,
+like `session_details`/`turn_details`) because `events` is near D1's
+100-column cap.
+
+- `web_pageview`: `path`, `referrer`, `visitor_id`, `utm_source`,
+  `utm_medium`, `utm_campaign`
+- `web_cta_click`: `path`, `cta` (e.g. `plus_early_access`,
+  `flagship_early_access`, `install`), `visitor_id`
+
+### Token subscription plan events (migration 0016)
+
+All require `account_id`; `tier` and `model` are attached where relevant
+(`model` is stored in the existing generic `model_start` column).
+
+- `subscription_login`: `account_id`, `tier`
+- `subscription_activated`: `account_id`, `tier`
+- `subscription_budget_exhausted`: `account_id`, `tier`, `model`
+- `subscription_router_error`: `account_id`, `tier`, `model`
+- `account_linked`: `telemetry_id` (the standard `id` field) + `account_id`.
+  This is the analytics<->account join anchor: it ties an anonymous CLI
+  `telemetry_id` to a subscription `account_id`, and is never pruned.
+
+Web + subscription events are firehosed to the separate `jcode_web_firehose`
+dataset (`FIREHOSE_WEB_SCHEMA` in `src/worker.js`, also append-only): the
+main `FIREHOSE_SCHEMA` is at Analytics Engine's 20-blob/20-double capacity.
+For web events `index1` is the `visitor_id`.
 
 ## Querying Data
 
@@ -213,6 +260,31 @@ wrangler d1 execute jcode-telemetry --command "SELECT AVG(CASE WHEN session_succ
 
 # Tool and response latency (last 30d)
 wrangler d1 execute jcode-telemetry --command "SELECT AVG(first_assistant_response_ms) AS avg_first_response_ms, AVG(first_tool_success_ms) AS avg_first_tool_success_ms, AVG(CASE WHEN executed_tool_calls > 0 THEN CAST(tool_latency_total_ms AS REAL) / executed_tool_calls END) AS avg_tool_latency_ms FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days')"
+
+# --- Website + subscription analytics (requires 0016) ---
+
+# Daily web visitors (distinct anonymous visitor_ids per UTC day, last 30d)
+wrangler d1 execute jcode-telemetry --command "SELECT date(e.created_at) AS day, COUNT(DISTINCT w.visitor_id) AS visitors, COUNT(*) AS pageviews FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_pageview' AND e.created_at > datetime('now', '-30 days') GROUP BY day ORDER BY day"
+
+# Pricing-page funnel: pageview -> CTA click by tier (last 30d).
+# cta encodes the tier (plus_early_access / flagship_early_access / install).
+wrangler d1 execute jcode-telemetry --command "WITH viewers AS (SELECT COUNT(DISTINCT w.visitor_id) AS n FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_pageview' AND w.path = '/pricing' AND e.created_at > datetime('now', '-30 days')) SELECT w.cta, COUNT(DISTINCT w.visitor_id) AS clickers, (SELECT n FROM viewers) AS pricing_viewers, ROUND(1.0 * COUNT(DISTINCT w.visitor_id) / MAX(1, (SELECT n FROM viewers)), 4) AS click_through FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_cta_click' AND w.path = '/pricing' AND e.created_at > datetime('now', '-30 days') GROUP BY w.cta ORDER BY clickers DESC"
+
+# Traffic sources for pricing pageviews (last 30d)
+wrangler d1 execute jcode-telemetry --command "SELECT w.utm_source, w.utm_medium, w.utm_campaign, COUNT(DISTINCT w.visitor_id) AS visitors FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_pageview' AND e.created_at > datetime('now', '-30 days') GROUP BY 1, 2, 3 ORDER BY visitors DESC"
+
+# Subscription activations by tier (last 30d)
+wrangler d1 execute jcode-telemetry --command "SELECT tier, COUNT(DISTINCT account_id) AS accounts, COUNT(*) AS activations FROM events WHERE event = 'subscription_activated' AND created_at > datetime('now', '-30 days') GROUP BY tier ORDER BY accounts DESC"
+
+# Budget exhaustion count (accounts hitting their token budget, by tier, last 30d)
+wrangler d1 execute jcode-telemetry --command "SELECT tier, COUNT(*) AS exhaustion_events, COUNT(DISTINCT account_id) AS accounts FROM events WHERE event = 'subscription_budget_exhausted' AND created_at > datetime('now', '-30 days') GROUP BY tier ORDER BY exhaustion_events DESC"
+
+# Subscription router errors by tier/model (last 7d)
+wrangler d1 execute jcode-telemetry --command "SELECT tier, model_start AS model, COUNT(*) AS errors, COUNT(DISTINCT account_id) AS accounts FROM events WHERE event = 'subscription_router_error' AND created_at > datetime('now', '-7 days') GROUP BY 1, 2 ORDER BY errors DESC"
+
+# account_linked join example: CLI usage (meaningful active days, last 30d)
+# per subscribed account, via the telemetry_id <-> account_id anchor.
+wrangler d1 execute jcode-telemetry --command "WITH links AS (SELECT DISTINCT telemetry_id, account_id FROM events WHERE event = 'account_linked') SELECT l.account_id, COUNT(DISTINCT d.activity_date) AS active_days_30d, SUM(d.turn_end_count) AS turns_30d FROM links l JOIN daily_active_users d ON d.telemetry_id = l.telemetry_id WHERE d.activity_date > date('now', '-30 days') AND d.meaningful_active > 0 GROUP BY l.account_id ORDER BY active_days_30d DESC LIMIT 50"
 ```
 
 ## What to watch for
@@ -232,8 +304,8 @@ wrangler d1 execute jcode-telemetry --command "SELECT AVG(first_assistant_respon
 - Use `meaningful_release_active` for headline product usage. It excludes local/dev/git-checkout traffic and open/close sessions with no meaningful lifecycle activity.
 - For the cleanest headline numbers, prefer the `*_noci` columns, which additionally exclude `is_ci = 1` traffic. Ephemeral CI runners mint a fresh `telemetry_id` per job, so unfiltered they look like brand-new users and installs, inflating active-user/install counts and depressing retention. The client also skips the `install` event under CI, so historical CI installs (before that ships) are the main residual source; the rollup's `last_is_ci` flag lets dashboards filter the rest. Raw events stay tagged (not dropped) so CI crash/error signal is still queryable.
 - Meaningful activity is derived from `session_end`/`session_crash` **and** `turn_end` events. A `turn_end` only fires after a real user turn completes, so counting it keeps the metric accurate for users whose `session_end` is lost (process killed, machine shutdown, dropped final flush, or a session still open at UTC midnight).
-- **Retention pruning**: D1 hard-caps databases at 500 MB. When the cap is hit, every insert fails with HTTP 500 and telemetry silently stops being recorded (this happened in June 2026; ~3 days of events were lost). The worker now runs a nightly cron (`scheduled` handler, see `RETENTION_DAYS` in `src/worker.js`) that prunes high-volume raw rows: `turn_end`/`session_start`/`onboarding_step` after 30 days, `upgrade` after 60, `auth_success` after 180, `session_end`/`session_crash` after 365. `install` and `feedback` rows are never pruned. Because of this, **historical user/DAU queries must read `daily_active_users`, not raw `events`** - the rollup is backfilled across full history (migration 0014) and maintained at insert time.
-- **D1 100-column cap**: production `events` has 96 columns and D1 refuses `ALTER TABLE ADD COLUMN` past 100 (`too many columns`). Migration 0005's per-turn/session-cadence columns never applied to production `events`; migration 0013 moved those fields into `turn_details`/`session_details`, and the worker writes them there. Do not add new columns to `events`; add them to the detail tables.
+- **Retention pruning**: D1 hard-caps databases at 500 MB. When the cap is hit, every insert fails with HTTP 500 and telemetry silently stops being recorded (this happened in June 2026; ~3 days of events were lost). The worker now runs a nightly cron (`scheduled` handler, see `RETENTION_DAYS` in `src/worker.js`) that prunes high-volume raw rows: `turn_end`/`session_start`/`onboarding_step` after 30 days, `upgrade` after 60, `auth_success` after 180, `session_end`/`session_crash` after 365, `web_pageview`/`subscription_router_error` after 90, `web_cta_click`/`subscription_budget_exhausted` after 365, `subscription_login` after 180. `install`, `feedback`, `subscription_activated`, and `account_linked` rows are never pruned.  Because of this, **historical user/DAU queries must read `daily_active_users`, not raw `events`** - the rollup is backfilled across full history (migration 0014) and maintained at insert time.
+- **D1 100-column cap**: production `events` has 98 columns after migration 0016 and D1 refuses `ALTER TABLE ADD COLUMN` past 100 (`too many columns`). Migration 0005's per-turn/session-cadence columns never applied to production `events`; migration 0013 moved those fields into `turn_details`/`session_details`, and migration 0016 put the web beacon fields in `web_details` for the same reason. Do not add new columns to `events`; add them to the detail tables.
 - Raw events remain the source of truth within their retention windows. The `daily_active_users` table is an ingest-time rollup for cheap dashboard queries and is the durable record beyond those windows.
 - The worker uses `INSERT OR IGNORE` keyed by `event_id`; rollups and detail rows are updated only when the canonical raw event insert succeeds, so client retries do not inflate counts.
 - Telemetry still undercounts users who opt out (`JCODE_NO_TELEMETRY`, `DO_NOT_TRACK`, `~/.jcode/no_telemetry`) or whose network blocks telemetry, and may overcount one person using multiple machines.
