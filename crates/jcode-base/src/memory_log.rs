@@ -297,6 +297,22 @@ pub fn log_marked_injected(session_id: &str, ids: &[String]) {
     );
 }
 
+/// Log when memories are marked as already known to a session without an
+/// injection (e.g. extracted from that session's own transcript).
+pub fn log_marked_known(session_id: &str, ids: &[String], reason: &str) {
+    if ids.is_empty() {
+        return;
+    }
+    write_log(
+        "marked_known",
+        Some(serde_json::json!({
+            "target_session": session_id,
+            "memory_ids": ids,
+            "reason": reason,
+        })),
+    );
+}
+
 /// Log when a pending memory is consumed (actually injected into context).
 pub fn log_pending_consumed(session_id: &str, count: usize, age_ms: u64, prompt_chars: usize) {
     write_log(
