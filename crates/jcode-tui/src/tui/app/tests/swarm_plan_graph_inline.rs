@@ -900,21 +900,34 @@ fn test_swarm_plan_pushes_no_plan_graph_message_when_mermaid_disabled() {
 // wiring-audit.transcript-clear-diagram-leak: the session-switch audit only
 // covered the remote History `session_changed` path (server_events.rs ~1637),
 // which is the ONLY transcript-clear path that resets swarm_plan_items /
-// swarm_plan_version / swarm_plan_swarm_id. Every other transcript-clear path
-// goes through `clear_display_messages` (state_ui_messages.rs:392), which
-// touches neither the process-global ACTIVE_DIAGRAMS registry
-// (mermaid_active.rs; `clear_active_diagrams` is only called from
-// debug_bench.rs) nor the swarm plan snapshot fields. The tests below pin
-// that behavior for each path:
-//   1. local `/clear` -> reset_current_session (commands.rs:1703 ->
-//      commands_review.rs:270)
-//   2. local `/rewind N` (commands.rs ~2004) and `/rewind undo`
-//      (commands.rs ~1933)
-//   3. local session recovery (conversation_state.rs ~809)
-//   4. remote `/clear` (remote/key_handling.rs ~1610)
-//   5. disconnected Ctrl+L (remote.rs ~1670; connected-remote Ctrl+L at
-//      key_handling.rs ~611 and local Ctrl+L at input.rs ~1922 are no-ops
-//      that clear nothing)
+// swarm_plan_version / swarm_plan_swarm_id. The other transcript-clear paths
+// go through `clear_display_messages` (state_ui_messages.rs), which touches
+// neither the process-global ACTIVE_DIAGRAMS registry (mermaid_active.rs)
+// nor the swarm plan snapshot fields. Whether each path also clears the
+// registry is a deliberate per-path decision:
+//
+// FULL-DISCARD paths now re-scope the registry (clear_active_diagrams),
+// because the entire transcript is gone for good and nothing cached can
+// re-present it, so every registered diagram is orphaned:
+//   1. local `/clear` -> reset_current_session (commands.rs ->
+//      commands_review.rs) - creates a brand-new empty session
+//   4. remote `/clear` (remote/key_handling.rs) - server session is cleared
+//
+// PARTIAL-RETENTION / RESTORABLE paths deliberately KEEP the registry,
+// because body-cache prefix/exact reuse (ui_prepare.rs build_body_from_base)
+// skips re-rendering retained or restored messages, so their diagrams would
+// never re-register if the registry were cleared here. Diagrams from removed
+// messages leak until ACTIVE_DIAGRAMS_MAX eviction - a pinned tradeoff:
+//   2. local `/rewind N` (commands.rs) and `/rewind undo` (commands.rs)
+//   3. local session recovery (conversation_state.rs)
+//   5. disconnected Ctrl+L (remote.rs; the transcript is restored from the
+//      server's History on reconnect via cache-reusable messages;
+//      connected-remote Ctrl+L at key_handling.rs ~611 and local Ctrl+L at
+//      input.rs ~1922 are no-ops that clear nothing)
+//   (session-changing History: see
+//   test_session_change_history_leaks_previous_session_active_diagram -
+//   switching BACK to the previous session reuses its cached body without
+//   re-rendering, so clearing on switch would blank the pane)
 // ---------------------------------------------------------------------------
 
 /// Seeds one plan-graph message via a SwarmPlan event and renders it through
@@ -999,12 +1012,40 @@ fn assert_transcript_clear_leaks_diagram_and_plan_state(
     );
 }
 
-/// Path 1: local `/clear` (commands.rs:1703 -> reset_current_session at
-/// commands_review.rs:270). It resets the session, provider messages, and
-/// display messages but never calls `clear_active_diagrams` and never touches
-/// the swarm plan snapshot fields.
+/// Shared post-clear assertions for the FULL-DISCARD paths: the transcript
+/// and the diagram registry are both wiped (no orphaned diagram can be shown
+/// by the pinned pane or the Margin info widget), while the swarm plan
+/// snapshot fields still survive (a separate pinned staleness).
+fn assert_full_discard_clears_diagrams_but_keeps_plan_state(app: &mut App, path: &str) {
+    assert!(
+        plan_graph_titles(app).is_empty(),
+        "{path}: transcript wiped, no plan-graph message remains"
+    );
+    assert!(
+        crate::tui::mermaid::get_active_diagrams().is_empty(),
+        "{path}: FIX - full transcript discard re-scopes ACTIVE_DIAGRAMS \
+         (no orphaned diagram survives)"
+    );
+    assert!(
+        !app.swarm_plan_items.is_empty(),
+        "{path}: STALE STATE (still pinned) - swarm_plan_items persist after the discard"
+    );
+    // With an empty registry the pinned pane has nothing to anchor on.
+    app.diagram_index = 0;
+    app.sync_diagram_fit_context();
+    assert_eq!(
+        app.last_visible_diagram_hash, None,
+        "{path}: pinned pane no longer anchors on a discarded diagram"
+    );
+}
+
+/// Path 1: local `/clear` (commands.rs -> reset_current_session at
+/// commands_review.rs). A full transcript discard: it now also clears the
+/// process-global ACTIVE_DIAGRAMS registry, so neither the pinned pane nor
+/// the Margin info widget can keep showing a diagram from the old
+/// transcript. The swarm plan snapshot fields remain stale (separate pin).
 #[test]
-fn test_local_clear_command_leaves_stale_active_diagram_and_swarm_plan_state() {
+fn test_local_clear_command_clears_active_diagrams_but_keeps_swarm_plan_state() {
     let _render_lock = scroll_render_test_lock();
     let _mode_guard = DiagramModeOverrideGuard::pinned();
     let mut app = create_test_app();
@@ -1015,14 +1056,49 @@ fn test_local_clear_command_leaves_stale_active_diagram_and_swarm_plan_state() {
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
     remote.mark_history_loaded();
 
-    let stale_hash = seed_rendered_plan_graph(&mut app, &mut remote);
+    let _stale_hash = seed_rendered_plan_graph(&mut app, &mut remote);
 
     assert!(super::commands::handle_session_command(&mut app, "/clear"));
 
-    assert_transcript_clear_leaks_diagram_and_plan_state(
+    assert_full_discard_clears_diagrams_but_keeps_plan_state(
         &mut app,
-        stale_hash,
         "local /clear (reset_current_session)",
+    );
+
+    crate::tui::mermaid::clear_active_diagrams();
+}
+
+/// Margin-mode counterpart of path 1, the exact user-visible bug the fix
+/// targets: immediately after a local `/clear`, the Margin info widget
+/// (which draws `get_active_diagrams()[0]`, info_widget.rs) must no longer
+/// list a diagram from the discarded transcript.
+#[test]
+fn test_local_clear_command_empties_margin_info_widget_diagram_list() {
+    let _render_lock = scroll_render_test_lock();
+    let _mode_guard = DiagramModeOverrideGuard::margin();
+    let mut app = create_test_app();
+    app.diagram_mode = crate::config::DiagramDisplayMode::Margin;
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+
+    let stale_hash = seed_rendered_plan_graph(&mut app, &mut remote);
+    assert_eq!(
+        crate::tui::TuiState::info_widget_data(&app)
+            .diagrams
+            .first()
+            .map(|d| d.hash),
+        Some(stale_hash),
+        "seed: the margin widget lists the rendered plan graph"
+    );
+
+    assert!(super::commands::handle_session_command(&mut app, "/clear"));
+
+    assert!(
+        crate::tui::TuiState::info_widget_data(&app).diagrams.is_empty(),
+        "FIX: after local /clear the Margin info widget lists no diagram \
+         from the discarded transcript"
     );
 
     crate::tui::mermaid::clear_active_diagrams();
@@ -1031,7 +1107,10 @@ fn test_local_clear_command_leaves_stale_active_diagram_and_swarm_plan_state() {
 /// Path 2: local `/rewind N` (commands.rs ~2004) and `/rewind undo`
 /// (commands.rs ~1933). Both rebuild the transcript via
 /// `clear_display_messages` + re-render; neither unregisters the plan-graph
-/// diagram nor resets the swarm plan snapshot.
+/// diagram nor resets the swarm plan snapshot. This survival is DELIBERATE
+/// (see the comments at the /rewind handlers): retained/restored messages
+/// are served from body-cache prefix reuse without re-rendering, so their
+/// diagrams would never re-register if the registry were cleared.
 #[test]
 fn test_local_rewind_and_undo_leave_stale_active_diagram_and_swarm_plan_state() {
     let _render_lock = scroll_render_test_lock();
@@ -1084,8 +1163,9 @@ fn test_local_rewind_and_undo_leave_stale_active_diagram_and_swarm_plan_state() 
 }
 
 /// Path 3: local session recovery (`recover_session_without_tools`,
-/// conversation_state.rs ~809). It rebuilds the session into a fresh one and
-/// clears the display transcript, but leaks the diagram and plan state the
+/// conversation_state.rs ~809). It rebuilds the session into a fresh one but
+/// KEEPS every text block, so the registry deliberately survives (the
+/// retained messages' diagrams stay backed); the plan state stays stale the
 /// same way.
 #[test]
 fn test_recover_session_without_tools_leaves_stale_active_diagram_and_swarm_plan_state() {
@@ -1112,11 +1192,12 @@ fn test_recover_session_without_tools_leaves_stale_active_diagram_and_swarm_plan
     crate::tui::mermaid::clear_active_diagrams();
 }
 
-/// Path 4: remote `/clear` (remote/key_handling.rs ~1610). Unlike the
-/// session-changing History event (which resets the swarm plan snapshot),
-/// the remote clear command wipes provider/display messages only.
+/// Path 4: remote `/clear` (remote/key_handling.rs). A full transcript
+/// discard like path 1: the server session is cleared, so the registry is
+/// re-scoped too. The swarm plan snapshot fields remain stale (unlike the
+/// session-changing History event, which resets them).
 #[test]
-fn test_remote_clear_command_leaves_stale_active_diagram_and_swarm_plan_state() {
+fn test_remote_clear_command_clears_active_diagrams_but_keeps_swarm_plan_state() {
     let _render_lock = scroll_render_test_lock();
     let _mode_guard = DiagramModeOverrideGuard::pinned();
     let mut app = create_test_app();
@@ -1128,7 +1209,7 @@ fn test_remote_clear_command_leaves_stale_active_diagram_and_swarm_plan_state() 
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
     remote.mark_history_loaded();
 
-    let stale_hash = seed_rendered_plan_graph(&mut app, &mut remote);
+    let _stale_hash = seed_rendered_plan_graph(&mut app, &mut remote);
 
     app.input = "/clear".to_string();
     app.cursor_pos = app.input.len();
@@ -1140,7 +1221,7 @@ fn test_remote_clear_command_leaves_stale_active_diagram_and_swarm_plan_state() 
         "remote /clear path executed"
     );
 
-    assert_transcript_clear_leaks_diagram_and_plan_state(&mut app, stale_hash, "remote /clear");
+    assert_full_discard_clears_diagrams_but_keeps_plan_state(&mut app, "remote /clear");
 
     crate::tui::mermaid::clear_active_diagrams();
 }
