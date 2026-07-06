@@ -216,6 +216,11 @@ pub(crate) fn reset_for_tests() {
 }
 
 #[cfg(test)]
+pub(crate) fn drain_pending_for_tests() -> Vec<UsageReport> {
+    with_state(drain_reports)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
