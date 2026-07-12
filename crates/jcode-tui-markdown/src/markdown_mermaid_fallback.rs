@@ -76,3 +76,7 @@ pub fn parse_image_placeholder(_line: &Line<'_>) -> Option<u64> {
 pub fn parse_inline_image_placeholder(_line: &Line<'_>) -> Option<(u64, u16, u16)> {
     None
 }
+
+pub fn register_external_image(_path: &std::path::Path, _width: u32, _height: u32) -> u64 {
+    0
+}
