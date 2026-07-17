@@ -113,7 +113,7 @@ This is a one-time owner setup and may require Azure billing and organization or
    - `WINDOWS_SIGNING_ACCOUNT`
    - `WINDOWS_SIGNING_CERTIFICATE_PROFILE`
 6. Push a test tag and confirm the `Sign and publish Windows assets` job signs both executables and that `Get-AuthenticodeSignature` returns `Valid`.
-7. Leave `WINDOWS_SIGNING_REQUIRED` unset or set it to `true`. Signing is required by default for Windows assets, so missing configuration or a signing outage omits Windows from that release while Linux and macOS can still publish. Setting it to `false` is an explicit emergency override and is not suitable for an official Windows release.
+7. Leave `WINDOWS_SIGNING_REQUIRED` unset or set it to `true`. Signing is required by default for Windows assets, so missing configuration or a signing outage omits Windows from that release while every other successful platform can still publish. Setting it to `false` is an explicit emergency override and is not suitable for an official Windows release.
 
 The workflow applies SHA-256 Authenticode signatures and RFC 3161 timestamps before packaging, checksum generation, and release upload. Both x64 and ARM64 executables are signed on a supported x64 Windows signing runner.
 
@@ -140,7 +140,7 @@ Windows is covered by:
 
 - `.github/workflows/ci.yml`: release build, test compilation, targeted platform tests, runtime smoke tests, lifecycle end-to-end tests, installer verification, and PowerShell syntax checks.
 - `.github/workflows/windows-smoke.yml`: manually dispatchable x64 and ARM64 smoke validation.
-- `.github/workflows/release.yml`: x64 and ARM64 builds, managed signing required for Windows publication, signature verification, packaging, and checksums. A Windows failure omits Windows assets without blocking the required Linux/macOS release.
+- `.github/workflows/release.yml`: x64 and ARM64 builds, managed signing required for Windows publication, signature verification, packaging, and checksums. Every platform and architecture publishes independently, so a Windows failure cannot block any successful Unix asset.
 
 ## Architecture notes
 
