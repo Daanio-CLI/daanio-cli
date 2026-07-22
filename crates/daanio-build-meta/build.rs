@@ -239,11 +239,12 @@ fn normalize_semver(value: &str) -> Option<String> {
     let suffix_start = trimmed.find(['-', '+']).unwrap_or(trimmed.len());
     let (core, suffix) = trimmed.split_at(suffix_start);
 
-    let mut parts = core.split('.');
-    parts.next()?.parse::<u32>().ok()?;
-    parts.next()?.parse::<u32>().ok()?;
-    parts.next()?.parse::<u32>().ok()?;
-    if parts.next().is_some() {
+    let parts = core.split('.').collect::<Vec<_>>();
+    if parts.len() != 3
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || !part.chars().all(|ch| ch.is_ascii_digit()))
+    {
         return None;
     }
 
