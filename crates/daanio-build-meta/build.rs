@@ -116,7 +116,7 @@ fn main() {
     //   Dirty:   v0.2.17-dev (abc1234, dirty)
     let is_release = std::env::var("DAANIO_RELEASE_BUILD").is_ok();
     let version = if is_release {
-        format!("v{}.{}.{} ({})", major, minor, patch, git_hash)
+        release_version(&build_semver, &git_hash)
     } else if dirty {
         format!("v{}.{}.{}-dev ({}, dirty)", major, minor, patch, git_hash)
     } else {
@@ -214,19 +214,65 @@ fn root_package_version(repo_root: &Path) -> Option<String> {
 }
 
 fn parse_semver(value: &str) -> Option<(u32, u32, u32)> {
-    let trimmed = value.trim().trim_start_matches('v');
-    let mut parts = trimmed.split('.');
+    let normalized = normalize_semver(value)?;
+    let core = normalized
+        .split_once(['-', '+'])
+        .map_or(normalized.as_str(), |(core, _)| core);
+    let mut parts = core.split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;
     let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
     Some((major, minor, patch))
+}
+
+/// Validate and normalize the release versions accepted by the installers.
+///
+/// The workspace package version is a plain `MAJOR.MINOR.PATCH`, while release
+/// tags may add a prerelease suffix such as `v0.1.0-daanio.1`. Keep that suffix
+/// intact so `--version`, installer verification, update metadata, and the
+/// GitHub tag all describe the same build.
+fn normalize_semver(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_start_matches('v');
+    let suffix_start = trimmed.find(['-', '+']).unwrap_or(trimmed.len());
+    let (core, suffix) = trimmed.split_at(suffix_start);
+
+    let mut parts = core.split('.');
+    parts.next()?.parse::<u32>().ok()?;
+    parts.next()?.parse::<u32>().ok()?;
+    parts.next()?.parse::<u32>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+
+    if !suffix.is_empty() {
+        let mut chars = suffix.chars();
+        if !matches!(chars.next(), Some('-' | '+')) {
+            return None;
+        }
+        let rest = chars.as_str();
+        if rest.is_empty()
+            || !rest
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-'))
+        {
+            return None;
+        }
+    }
+
+    Some(trimmed.to_string())
+}
+
+fn release_version(build_semver: &str, git_hash: &str) -> String {
+    format!("v{build_semver} ({git_hash})")
 }
 
 fn explicit_build_semver_override() -> Option<String> {
     std::env::var("DAANIO_BUILD_SEMVER")
         .ok()
-        .map(|value| value.trim().trim_start_matches('v').to_string())
-        .filter(|value| parse_semver(value).is_some())
+        .and_then(|value| normalize_semver(&value))
 }
 
 fn resolve_build_semver(base_version: (u32, u32, u32)) -> Result<String, String> {
@@ -316,4 +362,27 @@ fn metadata_value(key: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_semver, parse_semver, release_version};
+
+    #[test]
+    fn prerelease_semver_is_preserved_for_release_identity() {
+        let semver = normalize_semver("v0.1.0-daanio.1").expect("valid prerelease");
+        assert_eq!(semver, "0.1.0-daanio.1");
+        assert_eq!(parse_semver(&semver), Some((0, 1, 0)));
+        assert_eq!(
+            release_version(&semver, "ea7aa46"),
+            "v0.1.0-daanio.1 (ea7aa46)"
+        );
+    }
+
+    #[test]
+    fn malformed_release_versions_are_rejected() {
+        for value in ["0.1", "0.1.0-", "0.1.0_daanio", "0.1.beta"] {
+            assert_eq!(normalize_semver(value), None, "{value}");
+        }
+    }
 }
