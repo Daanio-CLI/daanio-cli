@@ -10,12 +10,41 @@ The KMS private key never leaves Google Cloud. The short-lived Google access
 token is used only inside the operator's Cloud Shell and must never be added to
 GitHub Secrets, command output, release assets, or repository files.
 
+## Automated private signing command
+
+The repository includes a private-operator script that performs all of the
+steps below. Run it only from the authorized Google Cloud Shell session after
+the Release workflow for the tag succeeds:
+
+```bash
+cd "$HOME/daanio-cli"
+export DAANIO_RELEASE_TAG='v0.1.0-daanio.2'
+git fetch --tags
+git checkout --detach "$DAANIO_RELEASE_TAG"
+scripts/sign_windows_release_gcp.sh \
+  --tag "$DAANIO_RELEASE_TAG" \
+  --certificate "$HOME/issued-windows-code-signing-chain.pem" \
+  --publish
+```
+
+The script automatically discovers the successful Release workflow, downloads
+both unsigned architectures, validates the certificate against the live HSM
+public key, installs a pinned checksum-verified Jsign when needed, signs and
+verifies both executables, packages them, updates `SHA256SUMS`, and uploads only
+the signed outputs. Omit `--publish` to prepare and verify the files without
+changing the GitHub release.
+
+This is deliberately an operator-initiated command. Do not put the Google
+access token or KMS permission in the public GitHub repository. Fully unattended
+GitHub signing would violate that isolation boundary.
+
 ## Prerequisites
 
 - An issued Authenticode certificate chain whose leaf certificate has the
   `Code Signing` extended-key usage and matches the KMS public key.
-- `gcloud`, `gh`, Java, and [Jsign](https://github.com/ebourg/jsign) installed
-  in the private signing environment.
+- `gcloud`, `gh`, Java, `curl`, and OpenSSL installed in the private signing
+  environment. The automated command installs a pinned, checksum-verified
+  [Jsign](https://github.com/ebourg/jsign) when it is not already available.
 - `gh auth status` reports an account allowed to update
   `Daanio-CLI/daanio-cli` releases.
 - The Google identity in Cloud Shell has
