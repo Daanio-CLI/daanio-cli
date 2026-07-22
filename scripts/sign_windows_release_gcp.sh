@@ -245,7 +245,29 @@ sign_file() {
     --certfile "$certificate_file" --alg SHA-256 --tsmode RFC3161 \
     --tsaurl 'http://timestamp.digicert.com,http://timestamp.sectigo.com' \
     --name 'Daanio CLI' --url 'https://daanio.com' "$target"
-  "${jsign_command[@]}" --verify --verbose "$target"
+
+  # Jsign 7.5 no longer exposes the historical --verify option. Extracting the
+  # signature through Jsign validates that the PE signature is readable. Then
+  # parse the PKCS#7 payload, require the exact configured signer public key,
+  # and require an embedded RFC 3161 timestamp token. A final native
+  # Get-AuthenticodeSignature check is still required on Windows.
+  signature_file="$target.sig"
+  signature_certificates="$target.sig.certificates.pem"
+  signature_public_key="$target.sig.public-key.der"
+  signature_structure="$target.sig.asn1.txt"
+  rm -f "$signature_file" "$signature_certificates" "$signature_public_key" "$signature_structure"
+  "${jsign_command[@]}" extract --format DER "$target"
+  [ -s "$signature_file" ] || err "Jsign did not extract an embedded signature from $target"
+  openssl pkcs7 -inform DER -in "$signature_file" -print_certs -out "$signature_certificates"
+  openssl x509 -in "$signature_certificates" -pubkey -noout |
+    openssl pkey -pubin -outform DER -out "$signature_public_key"
+  embedded_fingerprint="$(sha256_value "$signature_public_key")"
+  [ "$embedded_fingerprint" = "$certificate_fingerprint" ] ||
+    err "embedded signer certificate does not match the configured DigiCert certificate"
+  openssl asn1parse -inform DER -in "$signature_file" -i > "$signature_structure"
+  grep -Fq 'id-smime-ct-TSTInfo' "$signature_structure" || err "signed file has no RFC 3161 timestamp token"
+  rm -f "$signature_file" "$signature_certificates" "$signature_public_key" "$signature_structure"
+  success "Embedded Authenticode signer and RFC 3161 timestamp validated: $(basename "$target")"
 }
 
 info "Signing Windows x86_64 with Google Cloud HSM..."

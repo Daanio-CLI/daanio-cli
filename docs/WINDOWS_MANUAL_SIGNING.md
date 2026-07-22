@@ -126,14 +126,19 @@ jsign --storetype GOOGLECLOUD --keystore "$DAANIO_GCP_KEYRING" --storepass env:D
 unset DAANIO_GCP_ACCESS_TOKEN
 ```
 
-Verify both signatures before publishing:
+The automated command validates that each executable contains a parseable
+Authenticode signature, that its embedded signer public key matches the
+configured DigiCert certificate, and that it contains an RFC 3161 timestamp
+token. If `osslsigncode` is available, an additional portable verification can
+be run before publishing:
 
 ```bash
-jsign --verify --verbose signed/daanio-windows-x86_64.exe
-jsign --verify --verbose signed/daanio-windows-aarch64.exe
+osslsigncode verify -in signed/daanio-windows-x86_64.exe
+osslsigncode verify -in signed/daanio-windows-aarch64.exe
 ```
 
-Also verify at least the x86_64 file on Windows before public distribution:
+Always verify at least the x86_64 file with the native Windows trust policy
+before public distribution:
 
 ```powershell
 Get-AuthenticodeSignature .\daanio-windows-x86_64.exe |
