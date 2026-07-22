@@ -2,6 +2,17 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use super::provider_init::ProviderChoice;
 
+fn parse_public_provider_choice(value: &str) -> Result<ProviderChoice, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "daanio" | "daanio-api" | "daanio-gateway" => Ok(ProviderChoice::Daanio),
+        "auto" => Ok(ProviderChoice::Auto),
+        _ => Err(
+            "Daanio CLI supports only Daanio browser authentication. Use --provider daanio; upstream provider credentials are managed server-side and are not accepted by this CLI."
+                .to_string(),
+        ),
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum TranscriptModeArg {
     Insert,
@@ -27,12 +38,18 @@ pub(crate) enum ProviderAuthArg {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "jcode")]
-#[command(version = jcode_build_meta::version())]
-#[command(about = "J-Code: A coding agent using Claude Max or ChatGPT Pro subscriptions")]
+#[command(name = "daanio")]
+#[command(version = daanio_build_meta::version())]
+#[command(about = "Daanio CLI: a coding agent powered by the Daanio AI gateway")]
 pub(crate) struct Args {
-    /// Provider to use (jcode, claude, openai, openai-api, openrouter, azure, opencode, opencode-go, zai, 302ai, baseten, cortecs, comtegra, deepseek, fpt, firmware, huggingface, moonshotai, nebius, scaleway, stackit, groq, mistral, perplexity, togetherai, deepinfra, xai, nvidia-nim, lmstudio, ollama, chutes, cerebras, alibaba-coding-plan, openai-compatible, cursor, copilot, gemini, antigravity, google, or auto-detect)
-    #[arg(short, long, default_value = "auto", global = true)]
+    /// Provider to use. Public builds accept only Daanio; auto also resolves only Daanio.
+    #[arg(
+        short,
+        long,
+        default_value = "auto",
+        global = true,
+        value_parser = parse_public_provider_choice
+    )]
     pub(crate) provider: ProviderChoice,
 
     /// Working directory for the local client process
@@ -47,8 +64,8 @@ pub(crate) struct Args {
     #[arg(long, global = true)]
     pub(crate) no_update: bool,
 
-    /// Auto-update when new version is available (default: true for release builds)
-    #[arg(long, global = true, default_value = "true")]
+    /// Auto-update when a Daanio release repository is configured
+    #[arg(long, global = true, default_value = "false")]
     pub(crate) auto_update: bool,
 
     /// Log tool inputs/outputs and token usage to stderr
@@ -71,7 +88,7 @@ pub(crate) struct Args {
     #[arg(long, global = true, hide = true, value_name = "CHORD")]
     pub(crate) spawn_hotkey: Option<String>,
 
-    /// Disable auto-detection of jcode repository and self-dev mode
+    /// Disable auto-detection of daanio repository and self-dev mode
     #[arg(long, global = true)]
     pub(crate) no_selfdev: bool,
 
@@ -89,13 +106,12 @@ pub(crate) struct Args {
     #[arg(long, global = true)]
     pub(crate) debug_socket: bool,
 
-    /// Model to use (e.g., claude-opus-4-6, gpt-5.5)
+    /// Daanio model to use (for example, gpt-5.6-sol)
     #[arg(short, long, global = true)]
     pub(crate) model: Option<String>,
 
-    /// Named provider profile from [providers.<name>] in config.toml.
-    /// Implies --provider openai-compatible for OpenAI-compatible profiles.
-    #[arg(long, global = true)]
+    /// Internal legacy provider-profile option; disabled in public Daanio builds.
+    #[arg(long, global = true, hide = true)]
     pub(crate) provider_profile: Option<String>,
 
     /// Tool profile to expose to the model: full, minimal/lite, or none.
@@ -142,10 +158,10 @@ pub(crate) enum Command {
         server_name: Option<String>,
     },
 
-    /// Run as an Agent Client Protocol (ACP) adapter backed by the Jcode daemon
+    /// Run as an Agent Client Protocol (ACP) adapter backed by the Daanio daemon
     Acp,
 
-    /// Manage the background server daemon (e.g. `jcode server stop`).
+    /// Manage the background server daemon (e.g. `daanio server stop`).
     Server {
         #[command(subcommand)]
         action: ServerCommand,
@@ -168,67 +184,74 @@ pub(crate) enum Command {
         message: String,
     },
 
-    /// Login to a provider via OAuth, API key, or local credentials
+    /// Sign in securely through daanio.com
     Login {
-        /// Provider to log in to. Equivalent to --provider for this command, e.g. `jcode login google`.
+        /// Login target. Public builds accept only `daanio` (or `auto`, which resolves to Daanio).
         // Distinct clap id: the global `--provider` flag also has id "provider";
         // sharing the id makes clap drop the flag inside `login` (so
-        // `jcode login --provider x` errors) and propagate the global default
+        // `daanio login --provider x` errors) and propagate the global default
         // into this positional.
-        #[arg(value_enum, id = "login_provider", value_name = "PROVIDER")]
+        #[arg(
+            id = "login_provider",
+            value_name = "PROVIDER",
+            value_parser = parse_public_provider_choice
+        )]
         provider: Option<ProviderChoice>,
 
         /// Account label for multi-account support (stored labels are auto-numbered)
-        #[arg(long, short = 'a')]
+        #[arg(long, short = 'a', hide = true)]
         account: Option<String>,
 
-        /// Do not try to open a browser locally. Useful over SSH or on headless machines.
+        /// Do not open a browser automatically; print the approval URL instead.
         #[arg(long, alias = "headless")]
         no_browser: bool,
 
         /// Print a script-friendly auth URL and persist temporary login state for later completion.
-        #[arg(long, conflicts_with_all = ["callback_url", "auth_code"])]
+        #[arg(long, conflicts_with_all = ["callback_url", "auth_code"], hide = true)]
         print_auth_url: bool,
 
         /// Complete a previously printed auth flow using a full callback URL or query string.
-        #[arg(long, conflicts_with = "auth_code")]
+        #[arg(long, conflicts_with = "auth_code", hide = true)]
         callback_url: Option<String>,
 
         /// Complete a previously printed auth flow using a provider-issued authorization code.
-        #[arg(long, conflicts_with = "callback_url")]
+        #[arg(long, conflicts_with = "callback_url", hide = true)]
         auth_code: Option<String>,
 
         /// Emit machine-readable JSON for script-friendly login flows.
-        #[arg(long)]
+        #[arg(long, hide = true)]
         json: bool,
 
         /// Resume a pending scriptable login flow that does not require callback/code input.
-        #[arg(long, conflicts_with_all = ["print_auth_url", "callback_url", "auth_code"])]
+        #[arg(
+            long,
+            conflicts_with_all = ["print_auth_url", "callback_url", "auth_code"],
+            hide = true
+        )]
         complete: bool,
 
-        /// Save credentials without running the post-login live provider validation.
-        /// Useful for offline setup, CI, or when entering credentials before network access is available.
-        #[arg(long)]
+        /// Compatibility flag. Daanio device login already skips model runtime smoke validation.
+        #[arg(long, hide = true)]
         no_validate: bool,
 
-        /// Gmail/Google access tier for non-interactive flows. Defaults to full.
-        #[arg(long, value_enum)]
+        /// Internal legacy option; disabled in public Daanio builds.
+        #[arg(long, value_enum, hide = true)]
         google_access_tier: Option<GoogleAccessTierArg>,
 
-        /// OpenAI-compatible API base URL. Used with --provider openai-compatible/custom profiles.
-        #[arg(long)]
+        /// Internal legacy option; the Daanio endpoint cannot be overridden.
+        #[arg(long, hide = true)]
         api_base: Option<String>,
 
-        /// OpenAI-compatible API key. If omitted, jcode prompts securely when needed.
-        #[arg(long)]
+        /// Internal legacy option; browser login does not accept manually entered keys.
+        #[arg(long, hide = true)]
         api_key: Option<String>,
 
-        /// Environment variable name to store/use for an OpenAI-compatible API key.
-        #[arg(long)]
+        /// Internal legacy option; the Daanio key name cannot be overridden.
+        #[arg(long, hide = true)]
         api_key_env: Option<String>,
     },
 
-    /// Log in to and manage your Jcode account
+    /// Log in to and manage your Daanio account
     Account {
         #[command(subcommand)]
         action: AccountCommand,
@@ -237,7 +260,7 @@ pub(crate) enum Command {
     /// Run in simple REPL mode (no TUI)
     Repl,
 
-    /// Update jcode to the latest version
+    /// Update daanio to the latest version
     Update,
 
     /// Show build/version information in human or JSON form
@@ -247,7 +270,7 @@ pub(crate) enum Command {
         json: bool,
     },
 
-    /// Show usage limits for connected providers
+    /// Show Daanio gateway usage information
     Usage {
         /// Emit JSON instead of plain text
         #[arg(long)]
@@ -262,7 +285,7 @@ pub(crate) enum Command {
         build: bool,
     },
 
-    /// Debug socket CLI - interact with running jcode server
+    /// Debug socket CLI - interact with running daanio server
     Debug {
         /// Debug command to run (list, start, sessions, create_session, message, tool, state, history, etc.)
         #[arg(default_value = "help")]
@@ -305,7 +328,7 @@ pub(crate) enum Command {
     #[command(subcommand)]
     Ambient(AmbientCommand),
 
-    /// Optional Jcode Cloud/Jade integration commands
+    /// Optional Daanio Cloud/Jade integration commands
     #[command(subcommand)]
     Cloud(CloudCommand),
 
@@ -323,12 +346,12 @@ pub(crate) enum Command {
     /// Review and respond to pending ambient permission requests
     Permissions,
 
-    /// Inject externally transcribed text into the active Jcode TUI
+    /// Inject externally transcribed text into the active Daanio TUI
     Transcript {
         /// Transcript text. If omitted, reads from stdin.
         text: Option<String>,
 
-        /// How to apply the transcript inside Jcode
+        /// How to apply the transcript inside Daanio
         #[arg(long, value_enum, default_value = "send")]
         mode: TranscriptModeArg,
 
@@ -337,14 +360,14 @@ pub(crate) enum Command {
         session: Option<String>,
     },
 
-    /// Run configured dictation: send to last-focused jcode client or type raw text
+    /// Run configured dictation: send to last-focused daanio client or type raw text
     Dictate {
-        /// Type the transcript into the focused app instead of sending to jcode
+        /// Type the transcript into the focused app instead of sending to daanio
         #[arg(long)]
         r#type: bool,
     },
 
-    /// Set up the platform global hotkey to launch jcode
+    /// Set up the platform global hotkey to launch daanio
     SetupHotkey {
         /// Internal: run as the macOS hotkey listener process.
         #[arg(long, hide = true)]
@@ -363,7 +386,7 @@ pub(crate) enum Command {
         uninstall: bool,
     },
 
-    /// Install a launcher so jcode appears in your app launcher
+    /// Install a launcher so daanio appears in your app launcher
     SetupLauncher,
 
     /// Browser automation setup and status
@@ -427,8 +450,9 @@ pub(crate) enum Command {
     #[command(subcommand)]
     Model(ModelCommand),
 
-    /// Show live verification coverage. With no provider/model, prints the full coverage summary.
+    /// Internal legacy provider-coverage report.
     #[command(name = "provider-test-coverage", alias = "model-status")]
+    #[command(hide = true)]
     ProviderTestCoverage {
         /// Provider to look up. Omit provider and model to print the full coverage summary.
         #[arg(value_name = "PROVIDER")]
@@ -450,6 +474,7 @@ pub(crate) enum Command {
     /// Diagnose why a provider/model or the model picker is broken by walking the
     /// strict end-to-end checkpoints (catalog, picker, model-switch, chat, streaming, tools).
     #[command(name = "provider-doctor", alias = "provider-strict-e2e")]
+    #[command(hide = true)]
     ProviderDoctor {
         /// OpenAI-compatible provider id to diagnose (e.g. cerebras, fpt, nvidia-nim)
         #[arg(id = "doctor_provider", value_name = "PROVIDER")]
@@ -465,17 +490,17 @@ pub(crate) enum Command {
         json: bool,
     },
 
-    /// Test authentication end-to-end: login (optional), credential probe, refresh, and provider smoke
+    /// Test Daanio gateway authentication end-to-end
     AuthTest {
-        /// Run the provider login flow before validation (interactive/browser-based)
+        /// Run Daanio browser sign-in before validation
         #[arg(long)]
         login: bool,
 
-        /// Test all currently configured supported auth providers instead of just --provider
-        #[arg(long)]
+        /// Internal legacy option; upstream credential scanning is disabled.
+        #[arg(long, hide = true)]
         all_configured: bool,
 
-        /// Skip the provider runtime smoke prompt
+        /// Skip the Daanio gateway runtime smoke prompt
         #[arg(long)]
         no_smoke: bool,
 
@@ -512,7 +537,7 @@ pub(crate) enum Command {
         coverage_limit: usize,
     },
 
-    /// Save or restore the current set of open jcode windows across a system reboot
+    /// Save or restore the current set of open daanio windows across a system reboot
     Restart {
         #[command(subcommand)]
         action: RestartCommand,
@@ -533,7 +558,7 @@ pub(crate) enum Command {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum AccountCommand {
-    /// Open browser-based device authorization and wait for plan activation
+    /// Open secure browser-based Daanio device authorization
     Login {
         /// Do not open a browser automatically; print the public approval URL instead
         #[arg(long, alias = "headless")]
@@ -545,7 +570,7 @@ pub(crate) enum AccountCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Open the public Jcode account management page
+    /// Open the public Daanio account management page
     Manage,
     /// Revoke the current key when reachable, then securely clear local state
     Logout,
@@ -649,7 +674,7 @@ pub(crate) enum CloudSessionsCommand {
 
     /// Upload a specific local session JSON file to Jade cloud storage
     Upload {
-        /// Path to a local Jcode session JSON file
+        /// Path to a local Daanio session JSON file
         session_file: String,
 
         /// Upload without Jade's redaction pass
@@ -660,10 +685,10 @@ pub(crate) enum CloudSessionsCommand {
         jade: JadeCloudOptions,
     },
 
-    /// Upload the newest local Jcode session to Jade cloud storage
+    /// Upload the newest local Daanio session to Jade cloud storage
     UploadLatest {
-        /// Directory containing local Jcode session JSON files
-        #[arg(long, default_value = "~/.jcode/sessions")]
+        /// Directory containing local Daanio session JSON files
+        #[arg(long, default_value = "~/.daanio/sessions")]
         sessions_dir: String,
 
         /// Upload without Jade's redaction pass
@@ -676,7 +701,7 @@ pub(crate) enum CloudSessionsCommand {
 
     /// Sync new or changed local sessions to Jade cloud storage (idempotent; safe to schedule)
     Sync {
-        /// Directory containing local Jcode session JSON files (default: ~/.jcode/sessions)
+        /// Directory containing local Daanio session JSON files (default: ~/.daanio/sessions)
         #[arg(long)]
         sessions_dir: Option<String>,
 
@@ -797,7 +822,7 @@ pub(crate) struct JadeCloudOptions {
     #[arg(long)]
     pub(crate) region: Option<String>,
 
-    /// Path to the private Jade session helper. Defaults to $JCODE_JADE_SESSIONS_HELPER or ~/jade/scripts/jade_sessions.py.
+    /// Path to the private Jade session helper. Defaults to $DAANIO_JADE_SESSIONS_HELPER or ~/jade/scripts/jade_sessions.py.
     #[arg(long)]
     pub(crate) helper: Option<String>,
 }
@@ -821,9 +846,9 @@ impl CloudSessionViewFormat {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum RestartCommand {
-    /// Save a reboot snapshot of currently active jcode windows
+    /// Save a reboot snapshot of currently active daanio windows
     Save {
-        /// Restore this reboot snapshot automatically the next time plain `jcode` starts
+        /// Restore this reboot snapshot automatically the next time plain `daanio` starts
         #[arg(long)]
         auto_restore: bool,
     },
@@ -872,7 +897,7 @@ pub(crate) enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ProviderCommand {
-    /// List provider IDs you can pass to -p/--provider
+    /// List Daanio provider selections accepted by -p/--provider
     List {
         /// Emit JSON instead of plain text
         #[arg(long)]
@@ -886,7 +911,8 @@ pub(crate) enum ProviderCommand {
         json: bool,
     },
 
-    /// Add a named OpenAI-compatible API provider profile
+    /// Internal legacy command; custom providers are disabled in public Daanio builds.
+    #[command(hide = true)]
     Add {
         /// Profile name used with --provider-profile and config defaults, e.g. my-gateway
         name: String,
@@ -907,11 +933,11 @@ pub(crate) enum ProviderCommand {
         #[arg(long, conflicts_with = "no_api_key")]
         api_key_env: Option<String>,
 
-        /// API key value to store in jcode's private provider env file. Prefer --api-key-stdin for shell history safety.
+        /// API key value to store in daanio's private provider env file. Prefer --api-key-stdin for shell history safety.
         #[arg(long, conflicts_with_all = ["api_key_stdin", "no_api_key"])]
         api_key: Option<String>,
 
-        /// Read the API key from stdin and store it in jcode's private provider env file
+        /// Read the API key from stdin and store it in daanio's private provider env file
         #[arg(long, conflicts_with = "no_api_key")]
         api_key_stdin: bool,
 
@@ -927,7 +953,7 @@ pub(crate) enum ProviderCommand {
         #[arg(long)]
         auth_header: Option<String>,
 
-        /// Private env file name under jcode's app config directory for stored API keys
+        /// Private env file name under daanio's app config directory for stored API keys
         #[arg(long)]
         env_file: Option<String>,
 
@@ -955,7 +981,7 @@ pub(crate) enum ProviderCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum AuthCommand {
-    /// Show configured authentication status for model/tool providers
+    /// Show Daanio gateway authentication status
     Status {
         /// Emit JSON instead of plain text
         #[arg(long)]
@@ -963,7 +989,7 @@ pub(crate) enum AuthCommand {
     },
     /// Diagnose provider auth issues and suggest next steps
     Doctor {
-        /// Optional provider id or alias to focus diagnosis on one provider
+        /// Optional Daanio provider id
         #[arg(id = "auth_provider", value_name = "PROVIDER")]
         provider: Option<String>,
 

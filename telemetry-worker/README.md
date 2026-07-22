@@ -1,19 +1,19 @@
-# jcode Telemetry Worker
+# daanio Telemetry Worker
 
-Cloudflare Worker that receives anonymous telemetry events from jcode.
+Cloudflare Worker that receives anonymous telemetry events from daanio.
 
 The headline number is **Total users**: distinct, non-CI `telemetry_id`s that
-ever installed jcode OR did meaningful work in it. Run it with:
+ever installed daanio OR did meaningful work in it. Run it with:
 
 ```bash
-wrangler d1 execute jcode-telemetry --remote --file=users.sql
+wrangler d1 execute daanio-telemetry --remote --file=users.sql
 ```
 
 ## Storage architecture
 
 Events are dual-written to two stores with different jobs:
 
-1. **Workers Analytics Engine firehose** (`jcode_telemetry_firehose` dataset):
+1. **Workers Analytics Engine firehose** (`daanio_telemetry_firehose` dataset):
    every event, written first. Time-series store with no database size cap and
    ~90-day retention (adaptive sampling on reads; `index1` is the
    `telemetry_id`, so per-user sampling stays accurate). This is the primary
@@ -28,12 +28,12 @@ Events are dual-written to two stores with different jobs:
    curl -s "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/analytics_engine/sql" \
      -H "Authorization: Bearer $CF_ANALYTICS_TOKEN" \
      -d "SELECT blob9 AS provider, blob11 AS reason, SUM(_sample_interval) AS n
-         FROM jcode_telemetry_firehose
+         FROM daanio_telemetry_firehose
          WHERE blob1 = 'onboarding_step' AND blob8 = 'auth_failed'
            AND timestamp > NOW() - INTERVAL '7' DAY
          GROUP BY provider, reason ORDER BY n DESC"
    ```
-2. **D1** (`jcode-telemetry` database): the durable relational store for
+2. **D1** (`daanio-telemetry` database): the durable relational store for
    identity anchors (`install`, `feedback`), auth/lifecycle events, the
    `daily_active_users` rollup, and a retention-pruned raw tail of the
    high-volume events (see `RETENTION_DAYS`). All the dashboard SQL in this
@@ -69,14 +69,14 @@ database (create new D1 DB, copy live rows, repoint `wrangler.toml`).
 
 2. Create D1 database:
    ```bash
-   wrangler d1 create jcode-telemetry
+   wrangler d1 create daanio-telemetry
    ```
 
 3. Update `wrangler.toml` with the database ID from step 2
 
 4. Initialize schema:
    ```bash
-   wrangler d1 execute jcode-telemetry --file=schema.sql
+   wrangler d1 execute daanio-telemetry --file=schema.sql
    ```
 
 ### Migrating an existing database
@@ -85,11 +85,11 @@ If your production database was created before the latest telemetry fields were 
 apply all remote migrations:
 
 ```bash
-wrangler d1 execute jcode-telemetry --remote --file=migrations/0001_expand_events.sql
-wrangler d1 execute jcode-telemetry --remote --file=migrations/0002_transport_metrics.sql
-wrangler d1 execute jcode-telemetry --remote --file=migrations/0003_usage_expansion.sql
-wrangler d1 execute jcode-telemetry --remote --file=migrations/0004_telemetry_phase123.sql
-wrangler d1 execute jcode-telemetry --remote --file=migrations/0005_workflow_turn_telemetry.sql
+wrangler d1 execute daanio-telemetry --remote --file=migrations/0001_expand_events.sql
+wrangler d1 execute daanio-telemetry --remote --file=migrations/0002_transport_metrics.sql
+wrangler d1 execute daanio-telemetry --remote --file=migrations/0003_usage_expansion.sql
+wrangler d1 execute daanio-telemetry --remote --file=migrations/0004_telemetry_phase123.sql
+wrangler d1 execute daanio-telemetry --remote --file=migrations/0005_workflow_turn_telemetry.sql
 ```
 
 (...and so on through the latest numbered migration; each also has an
@@ -107,7 +107,7 @@ npm run deploy
    npm run deploy
    ```
 
-6. Set up custom domain (optional): point `telemetry.jcode.dev` to the worker in Cloudflare dashboard
+6. Set up custom domain (optional): point `telemetry.daanio.dev` to the worker in Cloudflare dashboard
 
 ### Ops helpers
 
@@ -137,13 +137,13 @@ npm run health
 
 ## Event types
 
-CLI events (sent by jcode itself): `install`, `upgrade`, `auth_success`,
+CLI events (sent by daanio itself): `install`, `upgrade`, `auth_success`,
 `onboarding_step`, `feedback`, `session_start`, `turn_end`, `session_end`,
 `session_crash`.
 
 ### Website analytics and quality events (migrations 0016 and 0018)
 
-Sent by the beacon on `https://jcode.sh` (and the
+Sent by the beacon on `https://daanio.com` (and the
 `https://solosystems.pages.dev` preview). The browser mints an anonymous
 `visitor_id` UUID in localStorage; the worker uses it as the telemetry id and
 fills in `version`/`os`/`arch` defaults, so the beacon payload can stay tiny.
@@ -189,7 +189,7 @@ binary downloads are measurable through intent only; shell installs can be joine
 through first launch. Browser privacy opt-outs and un-attributed/manual installs
 are intentionally excluded from the joined funnel. Every conversion-bearing
 event is also written to the dedicated
-`jcode_install_firehose` Analytics Engine dataset before D1, so the 90-day
+`daanio_install_firehose` Analytics Engine dataset before D1, so the 90-day
 funnel is reconstructable during a D1 outage.
 
 ### Token subscription plan events (migration 0016)
@@ -205,7 +205,7 @@ All require `account_id`; `tier` and `model` are attached where relevant
   This is the analytics<->account join anchor: it ties an anonymous CLI
   `telemetry_id` to a subscription `account_id`, and is never pruned.
 
-Web + subscription events are firehosed to the separate `jcode_web_firehose`
+Web + subscription events are firehosed to the separate `daanio_web_firehose`
 dataset (`FIREHOSE_WEB_SCHEMA` in `src/worker.js`, also append-only): the
 main `FIREHOSE_SCHEMA` is at Analytics Engine's 20-blob/20-double capacity.
 For web events `index1` is the `visitor_id`.
@@ -216,18 +216,18 @@ The 0018 fields were appended without reordering: `blob18=metric_name`,
 
 ```bash
 # Total installs (raw, and excluding CI runners which mint a fresh id per job)
-wrangler d1 execute jcode-telemetry --command "SELECT COUNT(DISTINCT telemetry_id) AS raw_installs, COUNT(DISTINCT CASE WHEN is_ci = 0 THEN telemetry_id END) AS installs_noci FROM events WHERE event = 'install'"
+wrangler d1 execute daanio-telemetry --command "SELECT COUNT(DISTINCT telemetry_id) AS raw_installs, COUNT(DISTINCT CASE WHEN is_ci = 0 THEN telemetry_id END) AS installs_noci FROM events WHERE event = 'install'"
 
 # Web vitals by route and rating over the retained 30-day D1 window
-wrangler d1 execute jcode-telemetry --command "SELECT w.path, w.metric_name, w.rating, COUNT(*) AS samples, AVG(w.metric_value) AS avg_value FROM events e JOIN web_details w USING (event_id) WHERE e.event = 'web_vital' AND e.created_at > datetime('now', '-30 days') GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+wrangler d1 execute daanio-telemetry --command "SELECT w.path, w.metric_name, w.rating, COUNT(*) AS samples, AVG(w.metric_value) AS avg_value FROM events e JOIN web_details w USING (event_id) WHERE e.event = 'web_vital' AND e.created_at > datetime('now', '-30 days') GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
 
 # Classified web errors by route over the retained 90-day D1 window
-wrangler d1 execute jcode-telemetry --command "SELECT w.path, w.error_kind, COUNT(*) AS errors FROM events e JOIN web_details w USING (event_id) WHERE e.event = 'web_error' AND e.created_at > datetime('now', '-90 days') GROUP BY 1, 2 ORDER BY errors DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT w.path, w.error_kind, COUNT(*) AS errors FROM events e JOIN web_details w USING (event_id) WHERE e.event = 'web_error' AND e.created_at > datetime('now', '-90 days') GROUP BY 1, 2 ORDER BY errors DESC"
 
 # Analytics Engine web-vital sample counts (append-only positions from 0018)
 curl -s "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/analytics_engine/sql" \
   -H "Authorization: Bearer $CF_ANALYTICS_TOKEN" \
-  -d "SELECT blob18 AS metric_name, blob19 AS rating, SUM(_sample_interval) AS samples, AVG(double2) AS avg_value FROM jcode_web_firehose WHERE blob1 = 'web_vital' AND timestamp > NOW() - INTERVAL '7' DAY GROUP BY metric_name, rating ORDER BY metric_name, rating"
+  -d "SELECT blob18 AS metric_name, blob19 AS rating, SUM(_sample_interval) AS samples, AVG(double2) AS avg_value FROM daanio_web_firehose WHERE blob1 = 'web_vital' AND timestamp > NOW() - INTERVAL '7' DAY GROUP BY metric_name, rating ORDER BY metric_name, rating"
 
 # Weekly / monthly active users (canonical: use the rollup so every window
 # shares one "meaningful" definition and includes session_crash + turn_end days).
@@ -235,107 +235,107 @@ curl -s "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/analytics_en
 # release channel, excluding automated CI traffic (ephemeral runners that mint a
 # fresh telemetry_id per job and otherwise inflate users/installs and tank retention).
 # WAU (last 7 UTC days):
-wrangler d1 execute jcode-telemetry --command "SELECT COUNT(DISTINCT telemetry_id) AS raw_wau, COUNT(DISTINCT CASE WHEN meaningful_active > 0 THEN telemetry_id END) AS meaningful_wau, COUNT(DISTINCT CASE WHEN meaningful_release_active > 0 THEN telemetry_id END) AS meaningful_release_wau, COUNT(DISTINCT CASE WHEN meaningful_release_active > 0 AND last_is_ci = 0 THEN telemetry_id END) AS meaningful_release_wau_noci FROM daily_active_users WHERE activity_date > date('now', '-7 days')"
+wrangler d1 execute daanio-telemetry --command "SELECT COUNT(DISTINCT telemetry_id) AS raw_wau, COUNT(DISTINCT CASE WHEN meaningful_active > 0 THEN telemetry_id END) AS meaningful_wau, COUNT(DISTINCT CASE WHEN meaningful_release_active > 0 THEN telemetry_id END) AS meaningful_release_wau, COUNT(DISTINCT CASE WHEN meaningful_release_active > 0 AND last_is_ci = 0 THEN telemetry_id END) AS meaningful_release_wau_noci FROM daily_active_users WHERE activity_date > date('now', '-7 days')"
 
 # MAU (last 30 UTC days):
-wrangler d1 execute jcode-telemetry --command "SELECT COUNT(DISTINCT telemetry_id) AS raw_mau, COUNT(DISTINCT CASE WHEN meaningful_active > 0 THEN telemetry_id END) AS meaningful_mau, COUNT(DISTINCT CASE WHEN meaningful_release_active > 0 THEN telemetry_id END) AS meaningful_release_mau, COUNT(DISTINCT CASE WHEN meaningful_release_active > 0 AND last_is_ci = 0 THEN telemetry_id END) AS meaningful_release_mau_noci FROM daily_active_users WHERE activity_date > date('now', '-30 days')"
+wrangler d1 execute daanio-telemetry --command "SELECT COUNT(DISTINCT telemetry_id) AS raw_mau, COUNT(DISTINCT CASE WHEN meaningful_active > 0 THEN telemetry_id END) AS meaningful_mau, COUNT(DISTINCT CASE WHEN meaningful_release_active > 0 THEN telemetry_id END) AS meaningful_release_mau, COUNT(DISTINCT CASE WHEN meaningful_release_active > 0 AND last_is_ci = 0 THEN telemetry_id END) AS meaningful_release_mau_noci FROM daily_active_users WHERE activity_date > date('now', '-30 days')"
 
 # Raw vs meaningful active users this week, directly from raw events (matches the
 # rollup definition: counts session_end/session_crash AND turn_end activity).
-wrangler d1 execute jcode-telemetry --command "SELECT COUNT(DISTINCT telemetry_id) AS raw_wau, COUNT(DISTINCT CASE WHEN (event IN ('session_end','session_crash') AND (turns > 0 OR had_user_prompt > 0 OR had_assistant_response > 0 OR assistant_responses > 0 OR tool_calls > 0 OR executed_tool_calls > 0 OR duration_secs > 0 OR error_provider_timeout > 0 OR error_auth_failed > 0 OR error_tool_error > 0 OR error_mcp_error > 0 OR error_rate_limited > 0 OR provider_switches > 0 OR model_switches > 0)) OR (event = 'turn_end' AND (assistant_responses > 0 OR tool_calls > 0 OR executed_tool_calls > 0 OR file_write_calls > 0 OR tests_run > 0 OR turn_success > 0)) THEN telemetry_id END) AS meaningful_wau FROM events WHERE event IN ('session_end','session_crash','turn_end') AND created_at > datetime('now', '-7 days')"
+wrangler d1 execute daanio-telemetry --command "SELECT COUNT(DISTINCT telemetry_id) AS raw_wau, COUNT(DISTINCT CASE WHEN (event IN ('session_end','session_crash') AND (turns > 0 OR had_user_prompt > 0 OR had_assistant_response > 0 OR assistant_responses > 0 OR tool_calls > 0 OR executed_tool_calls > 0 OR duration_secs > 0 OR error_provider_timeout > 0 OR error_auth_failed > 0 OR error_tool_error > 0 OR error_mcp_error > 0 OR error_rate_limited > 0 OR provider_switches > 0 OR model_switches > 0)) OR (event = 'turn_end' AND (assistant_responses > 0 OR tool_calls > 0 OR executed_tool_calls > 0 OR file_write_calls > 0 OR tests_run > 0 OR turn_success > 0)) THEN telemetry_id END) AS meaningful_wau FROM events WHERE event IN ('session_end','session_crash','turn_end') AND created_at > datetime('now', '-7 days')"
 
 # Provider distribution for meaningful sessions
-wrangler d1 execute jcode-telemetry --command "SELECT provider_end, COUNT(*) as sessions FROM events WHERE event = 'session_end' AND (turns > 0 OR duration_mins > 0 OR error_provider_timeout > 0 OR error_auth_failed > 0 OR error_tool_error > 0 OR error_mcp_error > 0 OR error_rate_limited > 0 OR provider_switches > 0 OR model_switches > 0) GROUP BY provider_end ORDER BY sessions DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT provider_end, COUNT(*) as sessions FROM events WHERE event = 'session_end' AND (turns > 0 OR duration_mins > 0 OR error_provider_timeout > 0 OR error_auth_failed > 0 OR error_tool_error > 0 OR error_mcp_error > 0 OR error_rate_limited > 0 OR provider_switches > 0 OR model_switches > 0) GROUP BY provider_end ORDER BY sessions DESC"
 
 # Average meaningful session duration
-wrangler d1 execute jcode-telemetry --command "SELECT AVG(duration_mins) as avg_mins, AVG(turns) as avg_turns FROM events WHERE event = 'session_end' AND (turns > 0 OR duration_mins > 0 OR error_provider_timeout > 0 OR error_auth_failed > 0 OR error_tool_error > 0 OR error_mcp_error > 0 OR error_rate_limited > 0 OR provider_switches > 0 OR model_switches > 0)"
+wrangler d1 execute daanio-telemetry --command "SELECT AVG(duration_mins) as avg_mins, AVG(turns) as avg_turns FROM events WHERE event = 'session_end' AND (turns > 0 OR duration_mins > 0 OR error_provider_timeout > 0 OR error_auth_failed > 0 OR error_tool_error > 0 OR error_mcp_error > 0 OR error_rate_limited > 0 OR provider_switches > 0 OR model_switches > 0)"
 
 # Error rates. Count affected sessions/users, not raw sums: raw sums are
 # dominated by runaway retry loops (one pre-breaker session logged 18k+ auth
 # failures), which makes one broken install look like a fleet-wide outage.
-wrangler d1 execute jcode-telemetry --command "SELECT COUNT(CASE WHEN error_provider_timeout > 0 THEN 1 END) as timeout_sessions, COUNT(CASE WHEN error_rate_limited > 0 THEN 1 END) as rate_limited_sessions, COUNT(CASE WHEN error_auth_failed > 0 THEN 1 END) as auth_failed_sessions, COUNT(DISTINCT CASE WHEN error_auth_failed > 0 THEN telemetry_id END) as auth_failed_users FROM events WHERE event = 'session_end'"
+wrangler d1 execute daanio-telemetry --command "SELECT COUNT(CASE WHEN error_provider_timeout > 0 THEN 1 END) as timeout_sessions, COUNT(CASE WHEN error_rate_limited > 0 THEN 1 END) as rate_limited_sessions, COUNT(CASE WHEN error_auth_failed > 0 THEN 1 END) as auth_failed_sessions, COUNT(DISTINCT CASE WHEN error_auth_failed > 0 THEN telemetry_id END) as auth_failed_users FROM events WHERE event = 'session_end'"
 
 # Auth failure reasons (requires 0015; reasons recorded from explicit auth_failed onboarding steps)
-wrangler d1 execute jcode-telemetry --command "SELECT auth_provider, auth_failure_reason, COUNT(*) AS n, COUNT(DISTINCT telemetry_id) AS users FROM events WHERE event = 'onboarding_step' AND step = 'auth_failed' AND created_at > datetime('now', '-30 days') GROUP BY 1, 2 ORDER BY n DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT auth_provider, auth_failure_reason, COUNT(*) AS n, COUNT(DISTINCT telemetry_id) AS users FROM events WHERE event = 'onboarding_step' AND step = 'auth_failed' AND created_at > datetime('now', '-30 days') GROUP BY 1, 2 ORDER BY n DESC"
 
 # Version adoption
-wrangler d1 execute jcode-telemetry --command "SELECT version, COUNT(DISTINCT telemetry_id) as users FROM events GROUP BY version ORDER BY version DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT version, COUNT(DISTINCT telemetry_id) as users FROM events GROUP BY version ORDER BY version DESC"
 
 # Heavy telemetry IDs (useful for spotting dev/test noise)
-wrangler d1 execute jcode-telemetry --command "SELECT telemetry_id, COUNT(*) AS session_ends FROM events WHERE event = 'session_end' GROUP BY telemetry_id ORDER BY session_ends DESC LIMIT 20"
+wrangler d1 execute daanio-telemetry --command "SELECT telemetry_id, COUNT(*) AS session_ends FROM events WHERE event = 'session_end' GROUP BY telemetry_id ORDER BY session_ends DESC LIMIT 20"
 
 # OS/arch breakdown
-wrangler d1 execute jcode-telemetry --command "SELECT os, arch, COUNT(DISTINCT telemetry_id) as users FROM events GROUP BY os, arch ORDER BY users DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT os, arch, COUNT(DISTINCT telemetry_id) as users FROM events GROUP BY os, arch ORDER BY users DESC"
 
 # Transport breakdown (requires 0002 transport migration)
-wrangler d1 execute jcode-telemetry --command "SELECT SUM(transport_https) AS https, SUM(transport_persistent_ws_fresh) AS ws_fresh, SUM(transport_persistent_ws_reuse) AS ws_reuse, SUM(transport_cli_subprocess) AS cli, SUM(transport_native_http2) AS native_http2, SUM(transport_other) AS other FROM events WHERE event IN ('session_end', 'session_crash')"
+wrangler d1 execute daanio-telemetry --command "SELECT SUM(transport_https) AS https, SUM(transport_persistent_ws_fresh) AS ws_fresh, SUM(transport_persistent_ws_reuse) AS ws_reuse, SUM(transport_cli_subprocess) AS cli, SUM(transport_native_http2) AS native_http2, SUM(transport_other) AS other FROM events WHERE event IN ('session_end', 'session_crash')"
 
 # Telemetry health dashboard
-wrangler d1 execute jcode-telemetry --file=health.sql
+wrangler d1 execute daanio-telemetry --file=health.sql
 
 # Daily active users. Prefer meaningful_release_* as the headline product metric.
 npm run dau
 
 # Fast UTC-day DAU from the ingest-time rollup table
-wrangler d1 execute jcode-telemetry --remote --command "SELECT COUNT(*) AS raw_today, SUM(CASE WHEN meaningful_active > 0 THEN 1 ELSE 0 END) AS meaningful_today, SUM(CASE WHEN release_active > 0 THEN 1 ELSE 0 END) AS raw_release_today, SUM(CASE WHEN meaningful_release_active > 0 THEN 1 ELSE 0 END) AS meaningful_release_today FROM daily_active_users WHERE activity_date = date('now')"
+wrangler d1 execute daanio-telemetry --remote --command "SELECT COUNT(*) AS raw_today, SUM(CASE WHEN meaningful_active > 0 THEN 1 ELSE 0 END) AS meaningful_today, SUM(CASE WHEN release_active > 0 THEN 1 ELSE 0 END) AS raw_release_today, SUM(CASE WHEN meaningful_release_active > 0 THEN 1 ELSE 0 END) AS meaningful_release_today FROM daily_active_users WHERE activity_date = date('now')"
 
 # Auth activation funnel by provider
-wrangler d1 execute jcode-telemetry --command "SELECT auth_provider, COUNT(DISTINCT telemetry_id) AS users FROM events WHERE event = 'auth_success' GROUP BY auth_provider ORDER BY users DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT auth_provider, COUNT(DISTINCT telemetry_id) AS users FROM events WHERE event = 'auth_success' GROUP BY auth_provider ORDER BY users DESC"
 
 # Onboarding funnel steps
-wrangler d1 execute jcode-telemetry --command "SELECT step, COUNT(DISTINCT telemetry_id) AS users FROM events WHERE event = 'onboarding_step' GROUP BY step ORDER BY users DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT step, COUNT(DISTINCT telemetry_id) AS users FROM events WHERE event = 'onboarding_step' GROUP BY step ORDER BY users DESC"
 
 # Recent explicit feedback
-wrangler d1 execute jcode-telemetry --command "SELECT created_at, feedback_text, feedback_rating, feedback_reason, version, build_channel FROM events WHERE event = 'feedback' ORDER BY created_at DESC LIMIT 50"
+wrangler d1 execute daanio-telemetry --command "SELECT created_at, feedback_text, feedback_rating, feedback_reason, version, build_channel FROM events WHERE event = 'feedback' ORDER BY created_at DESC LIMIT 50"
 
 # Session starts by UTC hour (workflow timing)
-wrangler d1 execute jcode-telemetry --command "SELECT session_start_hour_utc, COUNT(*) AS sessions FROM events WHERE event = 'session_start' GROUP BY session_start_hour_utc ORDER BY session_start_hour_utc"
+wrangler d1 execute daanio-telemetry --command "SELECT session_start_hour_utc, COUNT(*) AS sessions FROM events WHERE event = 'session_start' GROUP BY session_start_hour_utc ORDER BY session_start_hour_utc"
 
 # Multi-sessioning rate
-wrangler d1 execute jcode-telemetry --command "SELECT AVG(CASE WHEN multi_sessioned > 0 THEN 1.0 ELSE 0.0 END) AS multi_session_rate FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days')"
+wrangler d1 execute daanio-telemetry --command "SELECT AVG(CASE WHEN multi_sessioned > 0 THEN 1.0 ELSE 0.0 END) AS multi_session_rate FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days')"
 
 # Per-turn latency and success
-wrangler d1 execute jcode-telemetry --command "SELECT AVG(turn_active_duration_ms) AS avg_turn_ms, AVG(CASE WHEN turn_success > 0 THEN 1.0 ELSE 0.0 END) AS turn_success_rate FROM events WHERE event = 'turn_end' AND created_at > datetime('now', '-30 days')"
+wrangler d1 execute daanio-telemetry --command "SELECT AVG(turn_active_duration_ms) AS avg_turn_ms, AVG(CASE WHEN turn_success > 0 THEN 1.0 ELSE 0.0 END) AS turn_success_rate FROM events WHERE event = 'turn_end' AND created_at > datetime('now', '-30 days')"
 
 # Build-channel cleanup for active users
-wrangler d1 execute jcode-telemetry --command "SELECT build_channel, COUNT(DISTINCT telemetry_id) AS users FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days') GROUP BY build_channel ORDER BY users DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT build_channel, COUNT(DISTINCT telemetry_id) AS users FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days') GROUP BY build_channel ORDER BY users DESC"
 
 # D7 retention for users who installed 8-14 days ago
-wrangler d1 execute jcode-telemetry --command "WITH cohort AS (SELECT DISTINCT telemetry_id FROM events WHERE event = 'install' AND created_at >= datetime('now', '-14 days') AND created_at < datetime('now', '-7 days')), retained AS (SELECT DISTINCT telemetry_id FROM events WHERE event IN ('session_end', 'session_crash') AND created_at >= datetime('now', '-7 days')) SELECT COUNT(*) AS cohort_users, (SELECT COUNT(*) FROM cohort WHERE telemetry_id IN retained) AS retained_users FROM cohort"
+wrangler d1 execute daanio-telemetry --command "WITH cohort AS (SELECT DISTINCT telemetry_id FROM events WHERE event = 'install' AND created_at >= datetime('now', '-14 days') AND created_at < datetime('now', '-7 days')), retained AS (SELECT DISTINCT telemetry_id FROM events WHERE event IN ('session_end', 'session_crash') AND created_at >= datetime('now', '-7 days')) SELECT COUNT(*) AS cohort_users, (SELECT COUNT(*) FROM cohort WHERE telemetry_id IN retained) AS retained_users FROM cohort"
 
 # Feature adoption (last 30d)
-wrangler d1 execute jcode-telemetry --command "SELECT SUM(feature_memory_used) AS memory_sessions, SUM(feature_swarm_used) AS swarm_sessions, SUM(feature_web_used) AS web_sessions, SUM(feature_email_used) AS email_sessions, SUM(feature_mcp_used) AS mcp_sessions, SUM(feature_side_panel_used) AS side_panel_sessions, SUM(feature_goal_used) AS goal_sessions, SUM(feature_selfdev_used) AS selfdev_sessions, SUM(feature_background_used) AS background_sessions, SUM(feature_subagent_used) AS subagent_sessions FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days')"
+wrangler d1 execute daanio-telemetry --command "SELECT SUM(feature_memory_used) AS memory_sessions, SUM(feature_swarm_used) AS swarm_sessions, SUM(feature_web_used) AS web_sessions, SUM(feature_email_used) AS email_sessions, SUM(feature_mcp_used) AS mcp_sessions, SUM(feature_side_panel_used) AS side_panel_sessions, SUM(feature_goal_used) AS goal_sessions, SUM(feature_selfdev_used) AS selfdev_sessions, SUM(feature_background_used) AS background_sessions, SUM(feature_subagent_used) AS subagent_sessions FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days')"
 
 # Session success rate + abandonment rate (last 30d)
-wrangler d1 execute jcode-telemetry --command "SELECT AVG(CASE WHEN session_success > 0 THEN 1.0 ELSE 0.0 END) AS success_rate, AVG(CASE WHEN abandoned_before_response > 0 THEN 1.0 ELSE 0.0 END) AS abandoned_before_response_rate FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days')"
+wrangler d1 execute daanio-telemetry --command "SELECT AVG(CASE WHEN session_success > 0 THEN 1.0 ELSE 0.0 END) AS success_rate, AVG(CASE WHEN abandoned_before_response > 0 THEN 1.0 ELSE 0.0 END) AS abandoned_before_response_rate FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days')"
 
 # Tool and response latency (last 30d)
-wrangler d1 execute jcode-telemetry --command "SELECT AVG(first_assistant_response_ms) AS avg_first_response_ms, AVG(first_tool_success_ms) AS avg_first_tool_success_ms, AVG(CASE WHEN executed_tool_calls > 0 THEN CAST(tool_latency_total_ms AS REAL) / executed_tool_calls END) AS avg_tool_latency_ms FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days')"
+wrangler d1 execute daanio-telemetry --command "SELECT AVG(first_assistant_response_ms) AS avg_first_response_ms, AVG(first_tool_success_ms) AS avg_first_tool_success_ms, AVG(CASE WHEN executed_tool_calls > 0 THEN CAST(tool_latency_total_ms AS REAL) / executed_tool_calls END) AS avg_tool_latency_ms FROM events WHERE event IN ('session_end', 'session_crash') AND created_at > datetime('now', '-30 days')"
 
 # --- Website + subscription analytics (requires 0016) ---
 
 # Daily web visitors (distinct anonymous visitor_ids per UTC day, last 30d)
-wrangler d1 execute jcode-telemetry --command "SELECT date(e.created_at) AS day, COUNT(DISTINCT w.visitor_id) AS visitors, COUNT(*) AS pageviews FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_pageview' AND e.created_at > datetime('now', '-30 days') GROUP BY day ORDER BY day"
+wrangler d1 execute daanio-telemetry --command "SELECT date(e.created_at) AS day, COUNT(DISTINCT w.visitor_id) AS visitors, COUNT(*) AS pageviews FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_pageview' AND e.created_at > datetime('now', '-30 days') GROUP BY day ORDER BY day"
 
 # Pricing-page funnel: pageview -> CTA click by tier (last 30d).
 # cta encodes the tier (plus_early_access / flagship_early_access / install).
-wrangler d1 execute jcode-telemetry --command "WITH viewers AS (SELECT COUNT(DISTINCT w.visitor_id) AS n FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_pageview' AND w.path = '/pricing' AND e.created_at > datetime('now', '-30 days')) SELECT w.cta, COUNT(DISTINCT w.visitor_id) AS clickers, (SELECT n FROM viewers) AS pricing_viewers, ROUND(1.0 * COUNT(DISTINCT w.visitor_id) / MAX(1, (SELECT n FROM viewers)), 4) AS click_through FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_cta_click' AND w.path = '/pricing' AND e.created_at > datetime('now', '-30 days') GROUP BY w.cta ORDER BY clickers DESC"
+wrangler d1 execute daanio-telemetry --command "WITH viewers AS (SELECT COUNT(DISTINCT w.visitor_id) AS n FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_pageview' AND w.path = '/pricing' AND e.created_at > datetime('now', '-30 days')) SELECT w.cta, COUNT(DISTINCT w.visitor_id) AS clickers, (SELECT n FROM viewers) AS pricing_viewers, ROUND(1.0 * COUNT(DISTINCT w.visitor_id) / MAX(1, (SELECT n FROM viewers)), 4) AS click_through FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_cta_click' AND w.path = '/pricing' AND e.created_at > datetime('now', '-30 days') GROUP BY w.cta ORDER BY clickers DESC"
 
 # Traffic sources for pricing pageviews (last 30d)
-wrangler d1 execute jcode-telemetry --command "SELECT w.utm_source, w.utm_medium, w.utm_campaign, COUNT(DISTINCT w.visitor_id) AS visitors FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_pageview' AND e.created_at > datetime('now', '-30 days') GROUP BY 1, 2, 3 ORDER BY visitors DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT w.utm_source, w.utm_medium, w.utm_campaign, COUNT(DISTINCT w.visitor_id) AS visitors FROM events e JOIN web_details w ON w.event_id = e.event_id WHERE e.event = 'web_pageview' AND e.created_at > datetime('now', '-30 days') GROUP BY 1, 2, 3 ORDER BY visitors DESC"
 
 # Subscription activations by tier (last 30d)
-wrangler d1 execute jcode-telemetry --command "SELECT tier, COUNT(DISTINCT account_id) AS accounts, COUNT(*) AS activations FROM events WHERE event = 'subscription_activated' AND created_at > datetime('now', '-30 days') GROUP BY tier ORDER BY accounts DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT tier, COUNT(DISTINCT account_id) AS accounts, COUNT(*) AS activations FROM events WHERE event = 'subscription_activated' AND created_at > datetime('now', '-30 days') GROUP BY tier ORDER BY accounts DESC"
 
 # Budget exhaustion count (accounts hitting their token budget, by tier, last 30d)
-wrangler d1 execute jcode-telemetry --command "SELECT tier, COUNT(*) AS exhaustion_events, COUNT(DISTINCT account_id) AS accounts FROM events WHERE event = 'subscription_budget_exhausted' AND created_at > datetime('now', '-30 days') GROUP BY tier ORDER BY exhaustion_events DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT tier, COUNT(*) AS exhaustion_events, COUNT(DISTINCT account_id) AS accounts FROM events WHERE event = 'subscription_budget_exhausted' AND created_at > datetime('now', '-30 days') GROUP BY tier ORDER BY exhaustion_events DESC"
 
 # Subscription router errors by tier/model (last 7d)
-wrangler d1 execute jcode-telemetry --command "SELECT tier, model_start AS model, COUNT(*) AS errors, COUNT(DISTINCT account_id) AS accounts FROM events WHERE event = 'subscription_router_error' AND created_at > datetime('now', '-7 days') GROUP BY 1, 2 ORDER BY errors DESC"
+wrangler d1 execute daanio-telemetry --command "SELECT tier, model_start AS model, COUNT(*) AS errors, COUNT(DISTINCT account_id) AS accounts FROM events WHERE event = 'subscription_router_error' AND created_at > datetime('now', '-7 days') GROUP BY 1, 2 ORDER BY errors DESC"
 
 # account_linked join example: CLI usage (meaningful active days, last 30d)
 # per subscribed account, via the telemetry_id <-> account_id anchor.
-wrangler d1 execute jcode-telemetry --command "WITH links AS (SELECT DISTINCT telemetry_id, account_id FROM events WHERE event = 'account_linked') SELECT l.account_id, COUNT(DISTINCT d.activity_date) AS active_days_30d, SUM(d.turn_end_count) AS turns_30d FROM links l JOIN daily_active_users d ON d.telemetry_id = l.telemetry_id WHERE d.activity_date > date('now', '-30 days') AND d.meaningful_active > 0 GROUP BY l.account_id ORDER BY active_days_30d DESC LIMIT 50"
+wrangler d1 execute daanio-telemetry --command "WITH links AS (SELECT DISTINCT telemetry_id, account_id FROM events WHERE event = 'account_linked') SELECT l.account_id, COUNT(DISTINCT d.activity_date) AS active_days_30d, SUM(d.turn_end_count) AS turns_30d FROM links l JOIN daily_active_users d ON d.telemetry_id = l.telemetry_id WHERE d.activity_date > date('now', '-30 days') AND d.meaningful_active > 0 GROUP BY l.account_id ORDER BY active_days_30d DESC LIMIT 50"
 ```
 
 ## What to watch for
@@ -359,4 +359,4 @@ wrangler d1 execute jcode-telemetry --command "WITH links AS (SELECT DISTINCT te
 - **D1 100-column cap**: production `events` has 98 columns after migration 0016 and D1 refuses `ALTER TABLE ADD COLUMN` past 100 (`too many columns`). Migration 0005's per-turn/session-cadence columns never applied to production `events`; migration 0013 moved those fields into `turn_details`/`session_details`, and migration 0016 put the web beacon fields in `web_details` for the same reason. Do not add new columns to `events`; add them to the detail tables.
 - Raw events remain the source of truth within their retention windows. The `daily_active_users` table is an ingest-time rollup for cheap dashboard queries and is the durable record beyond those windows.
 - The worker uses `INSERT OR IGNORE` keyed by `event_id`; rollups and detail rows are updated only when the canonical raw event insert succeeds, so client retries do not inflate counts.
-- Telemetry still undercounts users who opt out (`JCODE_NO_TELEMETRY`, `DO_NOT_TRACK`, `~/.jcode/no_telemetry`) or whose network blocks telemetry, and may overcount one person using multiple machines.
+- Telemetry still undercounts users who opt out (`DAANIO_NO_TELEMETRY`, `DO_NOT_TRACK`, `~/.daanio/no_telemetry`) or whose network blocks telemetry, and may overcount one person using multiple machines.

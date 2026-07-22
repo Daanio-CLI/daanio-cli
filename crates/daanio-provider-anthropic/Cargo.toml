@@ -1,0 +1,11 @@
+[package]
+name = "daanio-provider-anthropic"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+daanio-logging = { path = "../daanio-logging" }
+daanio-message-types = { path = "../daanio-message-types" }
+daanio-provider-core = { path = "../daanio-provider-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

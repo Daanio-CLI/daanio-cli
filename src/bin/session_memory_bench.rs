@@ -1,8 +1,8 @@
 use clap::{Parser, ValueEnum};
-use jcode::message::{ContentBlock, Role};
-use jcode::process_memory;
-use jcode::session::Session;
-use jcode::side_panel::{
+use daanio::message::{ContentBlock, Role};
+use daanio::process_memory;
+use daanio::session::Session;
+use daanio::side_panel::{
     SidePanelPage, SidePanelPageFormat, SidePanelPageSource, SidePanelSnapshot,
 };
 
@@ -61,7 +61,7 @@ fn main() -> anyhow::Result<()> {
 
     let process_before = process_memory::snapshot_with_source("bench:session-memory:before");
     let session = load_or_build_session(&args)?;
-    let display_messages = jcode::tui::display_messages_from_session(&session);
+    let display_messages = daanio::tui::display_messages_from_session(&session);
     let side_panel = build_side_panel(&args);
 
     let resident_provider_messages = match args.mode {
@@ -81,7 +81,7 @@ fn main() -> anyhow::Result<()> {
         BenchMode::Duplicated => "resident_ui",
     };
 
-    let client_memory = jcode::tui::transcript_memory_profile(
+    let client_memory = daanio::tui::transcript_memory_profile(
         &session,
         &resident_provider_messages,
         &materialized_provider_messages,

@@ -47,8 +47,8 @@ const KNOWN_EVENTS = [
 // allowlisted origins are echoed back explicitly so the policy keeps working
 // if ALLOWED_ORIGIN is ever narrowed.
 const WEB_ALLOWED_ORIGINS = new Set([
-  "https://jcode.sh",
-  "https://www.jcode.sh",
+  "https://daanio.com",
+  "https://www.daanio.com",
   "https://solosystems.dev",
   "https://www.solosystems.dev",
   "https://solosystems.pages.dev",
@@ -149,7 +149,7 @@ const FIREHOSE_SCHEMA = {
 };
 
 // ---------------------------------------------------------------------------
-// Web/subscription firehose (`jcode_web_firehose` dataset).
+// Web/subscription firehose (`daanio_web_firehose` dataset).
 //
 // FIREHOSE_SCHEMA above is append-only AND full: Analytics Engine caps a data
 // point at 20 blobs + 20 doubles, and both arrays are at capacity. The new

@@ -5,36 +5,36 @@
 /// Test safety system: action classification
 #[test]
 fn test_safety_classification() {
-    use jcode::safety::SafetySystem;
+    use daanio::safety::SafetySystem;
 
     let safety = SafetySystem::new();
 
     // Tier 1: auto-allowed
-    assert!(safety.classify("read") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("glob") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("grep") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("memory") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("todoread") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("todowrite") == jcode::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("read") == daanio::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("glob") == daanio::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("grep") == daanio::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("memory") == daanio::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("todoread") == daanio::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("todowrite") == daanio::safety::ActionTier::AutoAllowed);
 
     // Tier 2: requires permission
-    assert!(safety.classify("bash") == jcode::safety::ActionTier::RequiresPermission);
-    assert!(safety.classify("edit") == jcode::safety::ActionTier::RequiresPermission);
-    assert!(safety.classify("write") == jcode::safety::ActionTier::RequiresPermission);
+    assert!(safety.classify("bash") == daanio::safety::ActionTier::RequiresPermission);
+    assert!(safety.classify("edit") == daanio::safety::ActionTier::RequiresPermission);
+    assert!(safety.classify("write") == daanio::safety::ActionTier::RequiresPermission);
     assert!(
-        safety.classify("create_pull_request") == jcode::safety::ActionTier::RequiresPermission
+        safety.classify("create_pull_request") == daanio::safety::ActionTier::RequiresPermission
     );
-    assert!(safety.classify("send_email") == jcode::safety::ActionTier::RequiresPermission);
+    assert!(safety.classify("send_email") == daanio::safety::ActionTier::RequiresPermission);
 
     // Case insensitive
-    assert!(safety.classify("READ") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("Bash") == jcode::safety::ActionTier::RequiresPermission);
+    assert!(safety.classify("READ") == daanio::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("Bash") == daanio::safety::ActionTier::RequiresPermission);
 }
 
 /// Test safety system: permission request queue + decision flow
 #[test]
 fn test_safety_permission_flow() {
-    use jcode::safety::{PermissionRequest, PermissionResult, SafetySystem, Urgency};
+    use daanio::safety::{PermissionRequest, PermissionResult, SafetySystem, Urgency};
 
     let safety = SafetySystem::new();
 
@@ -80,7 +80,7 @@ fn test_safety_permission_flow() {
 /// Test safety system: transcript saving
 #[test]
 fn test_safety_transcript() {
-    use jcode::safety::{AmbientTranscript, SafetySystem, TranscriptStatus};
+    use daanio::safety::{AmbientTranscript, SafetySystem, TranscriptStatus};
 
     let safety = SafetySystem::new();
 
@@ -107,7 +107,7 @@ fn test_safety_transcript() {
 /// Test safety system: summary generation
 #[test]
 fn test_safety_summary_generation() {
-    use jcode::safety::{ActionLog, ActionTier, SafetySystem};
+    use daanio::safety::{ActionLog, ActionTier, SafetySystem};
 
     let safety = SafetySystem::new();
 

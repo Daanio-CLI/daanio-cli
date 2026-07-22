@@ -1,0 +1,18 @@
+[package]
+name = "daanio-provider-env"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "daanio_provider_env"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+daanio-core = { path = "../daanio-core" }
+daanio-logging = { path = "../daanio-logging" }
+daanio-provider-metadata = { path = "../daanio-provider-metadata" }
+daanio-storage = { path = "../daanio-storage" }
+
+[dev-dependencies]
+tempfile = "3"

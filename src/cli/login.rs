@@ -11,7 +11,7 @@ use crate::provider_catalog::{
 
 use super::provider_init::{ProviderChoice, login_provider_for_choice, save_named_api_key};
 
-mod jcode_device;
+mod daanio_device;
 mod scriptable;
 use scriptable::*;
 
@@ -159,6 +159,14 @@ pub async fn run_login(
     account_label: Option<&str>,
     options: LoginOptions,
 ) -> Result<()> {
+    let effective_choice = if std::env::var_os("DAANIO_FIRST_PARTY_ONLY").is_some()
+        && matches!(choice, ProviderChoice::Auto)
+    {
+        ProviderChoice::Daanio
+    } else {
+        *choice
+    };
+    let choice = &effective_choice;
     if let Some(provider) = login_provider_for_choice(choice) {
         if matches!(choice, ProviderChoice::ClaudeSubprocess) {
             eprintln!(
@@ -172,14 +180,14 @@ pub async fn run_login(
         ProviderChoice::Auto => {
             if options.uses_scriptable_flow()? {
                 anyhow::bail!(
-                    "Scriptable login flags require an explicit provider. Use `jcode login --provider <provider> ...`."
+                    "Scriptable login flags require an explicit provider. Use `daanio login --provider <provider> ...`."
                 );
             }
             crate::telemetry::record_setup_step_once("login_picker_opened");
             let providers = crate::provider_catalog::cli_login_providers();
             if !io::stdin().is_terminal() {
                 anyhow::bail!(
-                    "`jcode login --provider auto` requires an interactive terminal. Use `jcode login --provider <provider>` in non-interactive mode."
+                    "`daanio login --provider auto` requires an interactive terminal. Use `daanio login --provider <provider>` in non-interactive mode."
                 );
             }
             if let Some(imported) =
@@ -208,6 +216,22 @@ pub async fn run_login_provider(
     account_label: Option<&str>,
     options: LoginOptions,
 ) -> Result<()> {
+    if std::env::var_os("DAANIO_FIRST_PARTY_ONLY").is_some() && provider.id != "daanio" {
+        anyhow::bail!(
+            "External provider login is disabled. Daanio CLI uses a browser-authorized Daanio gateway credential. Run `daanio login daanio`."
+        );
+    }
+    if provider.id == "daanio"
+        && (options.openai_compatible_api_base.is_some()
+            || options.openai_compatible_api_key.is_some()
+            || options.openai_compatible_api_key_env.is_some()
+            || options.google_access_tier.is_some()
+            || options.uses_scriptable_flow()?)
+    {
+        anyhow::bail!(
+            "Daanio login uses secure browser approval. Manual keys, endpoint overrides, and upstream-provider credentials are not accepted. Run `daanio login daanio` without --api-key."
+        );
+    }
     crate::telemetry::record_provider_selected(provider.id);
     crate::telemetry::record_auth_started(provider.id, provider.auth_kind.label());
     let explicit_scriptable_flow = options.uses_scriptable_flow()?;
@@ -278,9 +302,19 @@ pub async fn run_login_provider(
                 eprintln!("Imported {} existing auth source(s).", imported);
                 Ok(LoginFlowOutcome::Completed)
             }
-            LoginProviderTarget::Jcode => login_jcode_flow(options.no_browser)
-                .await
-                .map(|_| LoginFlowOutcome::Completed),
+            LoginProviderTarget::Daanio => {
+                login_daanio_flow(options.no_browser)
+                    .await
+                    .map(|completion| match completion {
+                        daanio_device::LoginCompletion::CanceledBeforeApproval => {
+                            LoginFlowOutcome::Deferred
+                        }
+                        daanio_device::LoginCompletion::Active
+                        | daanio_device::LoginCompletion::KeySavedPlanPending => {
+                            LoginFlowOutcome::Completed
+                        }
+                    })
+            }
             LoginProviderTarget::Claude => login_claude_flow(account_label, options.no_browser)
                 .await
                 .map(|_| LoginFlowOutcome::Completed),
@@ -356,6 +390,31 @@ pub async fn run_login_provider(
         return Ok(());
     }
     auth::AuthStatus::invalidate_cache();
+    if matches!(provider.target, LoginProviderTarget::Daanio) {
+        // The device flow has already exchanged the one-time code, persisted the
+        // credential, and called `/v1/me`. A model completion is a deployment
+        // readiness test, not a login test; running it here made successful login
+        // wait through two smoke probes and their transient-error backoff.
+        eprintln!(
+            "Daanio login complete. Run `daanio auth-test --provider daanio` separately to test model runtime readiness."
+        );
+        crate::logging::auth_event(
+            "post_login_validation_skipped",
+            provider.id,
+            &[("reason", "device_flow_already_verified")],
+        );
+        crate::logging::auth_event(
+            "login_flow_completed",
+            provider.id,
+            &[
+                ("method", provider.auth_kind.label()),
+                ("validated", "device_flow"),
+            ],
+        );
+        maybe_persist_default_provider_after_login(provider, &options);
+        notify_running_server_auth_changed_best_effort(Some(provider.id)).await;
+        return Ok(());
+    }
     if options.no_validate {
         eprintln!("Skipping post-login provider validation (--no-validate).");
         crate::logging::auth_event(
@@ -441,7 +500,7 @@ fn maybe_persist_default_provider_after_login(
     }
 }
 
-/// Best-effort: tell a running jcode server that on-disk auth has changed so it
+/// Best-effort: tell a running daanio server that on-disk auth has changed so it
 /// can hot-initialize any newly-configured providers. No-op if no server is running.
 async fn notify_running_server_auth_changed_best_effort(provider: Option<&str>) {
     let Ok(mut client) = crate::server::Client::connect().await else {
@@ -465,14 +524,13 @@ async fn notify_running_server_auth_changed_best_effort(provider: Option<&str>) 
     }
 }
 
-async fn login_jcode_flow(no_browser: bool) -> Result<()> {
-    eprintln!("Starting jcode subscription sign-in...");
-    let _ = jcode_device::login_jcode_device_flow(no_browser).await?;
-    Ok(())
+async fn login_daanio_flow(no_browser: bool) -> Result<daanio_device::LoginCompletion> {
+    eprintln!("Starting secure Daanio browser sign-in...");
+    daanio_device::login_daanio_device_flow(no_browser).await
 }
 
-pub(crate) async fn run_jcode_account_login(no_browser: bool) -> Result<()> {
-    login_jcode_flow(no_browser).await
+pub(crate) async fn run_daanio_account_login(no_browser: bool) -> Result<()> {
+    login_daanio_flow(no_browser).await.map(|_| ())
 }
 
 fn login_openai_api_key_flow() -> Result<()> {
@@ -522,7 +580,7 @@ async fn login_claude_flow(requested_label: Option<&str>, no_browser: bool) -> R
     eprintln!(
         "Account '{}' stored at {}",
         label,
-        auth::claude::jcode_path()?.display()
+        auth::claude::daanio_path()?.display()
     );
     if let Some(email) = profile_email {
         eprintln!("Profile email: {}", email);
@@ -568,7 +626,7 @@ async fn login_openai_flow(requested_label: Option<&str>, no_browser: bool) -> R
     eprintln!(
         "Successfully logged in to OpenAI! Account '{}' saved to {}",
         label,
-        crate::storage::jcode_dir()?
+        crate::storage::daanio_dir()?
             .join("openai-auth.json")
             .display()
     );
@@ -654,7 +712,7 @@ fn login_azure_flow() -> Result<()> {
 
     eprintln!("Setting up Azure OpenAI...");
     eprintln!(
-        "Reference: OpenCode supports Azure OpenAI with Entra credentials. jcode uses Azure OpenAI's newer `/openai/v1` API with either Microsoft Entra ID or an API key.\n"
+        "Reference: OpenCode supports Azure OpenAI with Entra credentials. daanio uses Azure OpenAI's newer `/openai/v1` API with either Microsoft Entra ID or an API key.\n"
     );
 
     let endpoint_raw = read_line_trimmed(
@@ -699,7 +757,7 @@ fn login_azure_flow() -> Result<()> {
         eprintln!();
         eprintln!("Using Microsoft Entra ID via Azure's DefaultAzureCredential chain.");
         eprintln!(
-            "That means jcode can authenticate via `az login`, managed identity, or Azure environment credentials."
+            "That means daanio can authenticate via `az login`, managed identity, or Azure environment credentials."
         );
     } else {
         eprint!("Paste your Azure OpenAI API key: ");
@@ -772,7 +830,7 @@ fn login_openai_compatible_flow(
                     )
                 })?;
             crate::provider_catalog::save_env_value_to_env_file(
-                "JCODE_OPENAI_COMPAT_API_BASE",
+                "DAANIO_OPENAI_COMPAT_API_BASE",
                 crate::provider_catalog::OPENAI_COMPAT_PROFILE.env_file,
                 Some(&normalized),
             )?;
@@ -789,7 +847,7 @@ fn login_openai_compatible_flow(
                 anyhow::bail!("Invalid API key environment variable name: {}", api_key_env);
             }
             crate::provider_catalog::save_env_value_to_env_file(
-                "JCODE_OPENAI_COMPAT_API_KEY_NAME",
+                "DAANIO_OPENAI_COMPAT_API_KEY_NAME",
                 crate::provider_catalog::OPENAI_COMPAT_PROFILE.env_file,
                 Some(api_key_env),
             )?;
@@ -803,7 +861,7 @@ fn login_openai_compatible_flow(
         };
         if !default_model_input.is_empty() {
             crate::provider_catalog::save_env_value_to_env_file(
-                "JCODE_OPENAI_COMPAT_DEFAULT_MODEL",
+                "DAANIO_OPENAI_COMPAT_DEFAULT_MODEL",
                 crate::provider_catalog::OPENAI_COMPAT_PROFILE.env_file,
                 Some(&default_model_input),
             )?;
@@ -897,17 +955,17 @@ fn login_openai_compatible_flow(
         match resolved.id.as_str() {
             "ollama" => {
                 eprintln!(
-                    "Next step: install a model with `ollama pull llama3.2`, then run `jcode --provider ollama --model llama3.2 run 'hello'`."
+                    "Next step: install a model with `ollama pull llama3.2`, then run `daanio --provider ollama --model llama3.2 run 'hello'`."
                 );
             }
             "lmstudio" => {
                 eprintln!(
-                    "Next step: load a chat model in LM Studio's Local Server, then run jcode with that exact model id, for example `jcode --provider lmstudio --model <model-id> run 'hello'`."
+                    "Next step: load a chat model in LM Studio's Local Server, then run daanio with that exact model id, for example `daanio --provider lmstudio --model <model-id> run 'hello'`."
                 );
             }
             _ => {
                 eprintln!(
-                    "Next step: run jcode with a model available on this endpoint, for example `jcode --provider {} --model <model-id> run 'hello'`.",
+                    "Next step: run daanio with a model available on this endpoint, for example `daanio --provider {} --model <model-id> run 'hello'`.",
                     resolved.id
                 );
             }
@@ -990,7 +1048,7 @@ fn login_cursor_flow() -> Result<()> {
             .join("cursor.env")
             .display()
     );
-    eprintln!("jcode will use the native Cursor HTTPS transport.");
+    eprintln!("daanio will use the native Cursor HTTPS transport.");
     crate::telemetry::record_auth_success("cursor", "api_key");
     Ok(())
 }
@@ -1047,10 +1105,10 @@ async fn login_copilot_device_flow(no_browser: bool) -> Result<()> {
 async fn login_antigravity_flow(no_browser: bool) -> Result<()> {
     eprintln!("Starting native Antigravity login...");
     eprintln!(
-        "jcode will authenticate directly with Google Antigravity; the Antigravity desktop app is not required."
+        "daanio will authenticate directly with Google Antigravity; the Antigravity desktop app is not required."
     );
     eprintln!(
-        "If browser launch fails, or you pass `--no-browser`, jcode will prompt for the callback URL instead."
+        "If browser launch fails, or you pass `--no-browser`, daanio will prompt for the callback URL instead."
     );
     eprintln!(
         "If the browser later shows a loopback/callback error page, copy the full URL from the address bar and re-run with `--no-browser`."
@@ -1095,7 +1153,7 @@ async fn login_gemini_flow(no_browser: bool) -> Result<()> {
         "If your student/education plan is attached to your Google account, use that account in the browser flow."
     );
     eprintln!(
-        "If browser launch fails, or you pass `--no-browser`, jcode will prompt for the manual authorization code."
+        "If browser launch fails, or you pass `--no-browser`, daanio will prompt for the manual authorization code."
     );
     eprintln!(
         "Note: school / Workspace Google accounts may also require GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION for Code Assist entitlement checks."
@@ -1277,7 +1335,7 @@ async fn login_google_flow(
                         no_browser,
                     );
                     eprintln!("   - Choose 'External' user type");
-                    eprintln!("   - Fill in app name (e.g. 'jcode') and your email");
+                    eprintln!("   - Fill in app name (e.g. 'daanio') and your email");
                     eprintln!("   - Skip scopes (we'll request them during login)");
                     eprintln!("   - Add your email as a test user");
                     eprintln!("   - Save and continue through all steps");
@@ -1293,7 +1351,7 @@ async fn login_google_flow(
                     );
                     eprintln!("   - Click '+ Create Credentials' > 'OAuth client ID'");
                     eprintln!("   - Application type: 'Desktop app'");
-                    eprintln!("   - Name: 'jcode'");
+                    eprintln!("   - Name: 'daanio'");
                     eprintln!("   - Click 'Create'\n");
                     eprintln!("   A dialog will show your Client ID and Client Secret.\n");
 

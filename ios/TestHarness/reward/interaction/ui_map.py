@@ -1,7 +1,7 @@
 """Map the SwiftUI source -> tappable-control GEOMETRY per screen (`ui_map` worker).
 
 This module extracts the geometry (size + on-screen center, in points) of every
-interactive control on each jcode-mobile screen so the interaction-cost model can
+interactive control on each daanio-mobile screen so the interaction-cost model can
 apply Fitts' law to *real* targets. It is the `ui_map` piece described in the
 package docstring and depends only on the shared contract in ``model.py`` plus the
 standard library (NumPy/PIL are imported lazily, only by the optional
@@ -368,8 +368,8 @@ def _pairing_targets(
 # ---------------------------------------------------------------------------
 
 def _default_source_root() -> str:
-    """<repo>/ios/Sources/JCodeMobile, resolved relative to this file."""
-    return str(Path(__file__).resolve().parents[3] / "Sources" / "JCodeMobile")
+    """<repo>/ios/Sources/DaanioMobile, resolved relative to this file."""
+    return str(Path(__file__).resolve().parents[3] / "Sources" / "DaanioMobile")
 
 
 def build_ui_map(
@@ -456,7 +456,7 @@ def build_ui_map_from_screenshot(
     pixel-measured complement to :func:`build_ui_map`; it returns ``{"chat":
     [UITarget("send_measured", ...)]}`` (empty if no mint blob is found).
 
-    Requires NumPy + PIL. Use it on screenshots under ``/tmp/jcode-ui-matrix/``.
+    Requires NumPy + PIL. Use it on screenshots under ``/tmp/daanio-ui-matrix/``.
     """
     import numpy as np  # local imports: optional deps
     from PIL import Image

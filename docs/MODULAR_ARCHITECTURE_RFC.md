@@ -2,7 +2,7 @@
 
 Status: Draft
 
-This RFC describes a modular target architecture for jcode that matches the current codebase, preserves the existing product model, and gives us a safe migration path from today's mostly-monolithic root crate to a layered workspace.
+This RFC describes a modular target architecture for daanio that matches the current codebase, preserves the existing product model, and gives us a safe migration path from today's mostly-monolithic root crate to a layered workspace.
 
 It is intentionally aligned with:
 
@@ -28,9 +28,9 @@ It is intentionally aligned with:
 
 ## Executive Summary
 
-Today, jcode is best described as a **modular monolith with a growing workspace shell**:
+Today, daanio is best described as a **modular monolith with a growing workspace shell**:
 
-- The root `jcode` crate still owns most runtime orchestration and product behavior.
+- The root `daanio` crate still owns most runtime orchestration and product behavior.
 - Several heavy or relatively self-contained subsystems have already moved into workspace crates.
 - The codebase has strong module-level separation in some areas, but several broad root modules still act as architectural chokepoints.
 
@@ -39,7 +39,7 @@ The target architecture is a **layered workspace**:
 1. **Foundation layer** for stable shared types and runtime primitives.
 2. **Domain/runtime layer** for session, agent, provider, and server logic.
 3. **Interface layer** for CLI, TUI, self-dev, and optional heavy integrations.
-4. **Composition layer** where the top-level `jcode` package wires the product together.
+4. **Composition layer** where the top-level `daanio` package wires the product together.
 
 The most important design rule is this:
 
@@ -53,7 +53,7 @@ That rule serves both architecture quality and compile-speed goals.
 
 At the product level, the runtime architecture is already clear:
 
-- `jcode` is a **single-server, multi-client** application.
+- `daanio` is a **single-server, multi-client** application.
 - The server owns sessions, swarm state, background tasks, provider state, and shared services.
 - Clients are primarily TUI frontends that attach to server-owned sessions.
 - Self-dev is session-local capability on the shared server, not a separate architecture.
@@ -64,20 +64,20 @@ That model should stay intact.
 
 The current code organization is mixed:
 
-- **Root crate `jcode`** still contains most product logic.
+- **Root crate `daanio`** still contains most product logic.
 - **Workspace crates** already isolate several heavy or stable seams.
 - **Subdirectories under `src/`** increasingly reflect domain boundaries, especially for `agent`, `cli`, `server`, `tool`, and `tui`.
 
 Current workspace members from `Cargo.toml` are grouped roughly as follows:
 
-- root package: `jcode`
-- foundation/runtime support: `jcode-agent-runtime`, `jcode-core`, `jcode-storage`, `jcode-terminal-launch`, `jcode-tool-core`
-- data-contract crates: `jcode-ambient-types`, `jcode-auth-types`, `jcode-background-types`, `jcode-batch-types`, `jcode-config-types`, `jcode-gateway-types`, `jcode-memory-types`, `jcode-message-types`, `jcode-selfdev-types`, `jcode-session-types`, `jcode-side-panel-types`, `jcode-task-types`, `jcode-tool-types`, `jcode-usage-types`
-- protocol and planning: `jcode-protocol`, `jcode-plan`
-- heavy or optional integrations: `jcode-embedding`, `jcode-pdf`, `jcode-notify-email`
-- auth and providers: `jcode-azure-auth`, `jcode-provider-core`, `jcode-provider-metadata`, `jcode-provider-openrouter`, `jcode-provider-gemini`
-- TUI extraction seams: `jcode-tui-core`, `jcode-tui-markdown`, `jcode-tui-mermaid`, `jcode-tui-render`, `jcode-tui-workspace`
-- product surfaces outside the main TUI binary: `jcode-desktop`
+- root package: `daanio`
+- foundation/runtime support: `daanio-agent-runtime`, `daanio-core`, `daanio-storage`, `daanio-terminal-launch`, `daanio-tool-core`
+- data-contract crates: `daanio-ambient-types`, `daanio-auth-types`, `daanio-background-types`, `daanio-batch-types`, `daanio-config-types`, `daanio-gateway-types`, `daanio-memory-types`, `daanio-message-types`, `daanio-selfdev-types`, `daanio-session-types`, `daanio-side-panel-types`, `daanio-task-types`, `daanio-tool-types`, `daanio-usage-types`
+- protocol and planning: `daanio-protocol`, `daanio-plan`
+- heavy or optional integrations: `daanio-embedding`, `daanio-pdf`, `daanio-notify-email`
+- auth and providers: `daanio-azure-auth`, `daanio-provider-core`, `daanio-provider-metadata`, `daanio-provider-openrouter`, `daanio-provider-gemini`
+- TUI extraction seams: `daanio-tui-core`, `daanio-tui-markdown`, `daanio-tui-mermaid`, `daanio-tui-render`, `daanio-tui-workspace`
+- product surfaces outside the main TUI binary: `daanio-desktop`
 
 ### What the root crate still owns
 
@@ -87,7 +87,7 @@ The root crate still directly owns most of the following concerns:
 - server orchestration and socket lifecycle
 - session state and persistence
 - agent turn execution and tool orchestration
-- provider implementation composition and runtime provider wiring; the shared `Provider` trait now lives in `jcode-provider-core`
+- provider implementation composition and runtime provider wiring; the shared `Provider` trait now lives in `daanio-provider-core`
 - protocol/message/config types
 - tool registry and many tool implementations
 - TUI application state and rendering
@@ -101,41 +101,41 @@ These splits already exist and should be treated as real architectural footholds
 
 | Crate | Current role |
 |---|---|
-| `jcode-agent-runtime` | shared interrupt and lightweight runtime primitives for agent execution |
-| `jcode-ambient-types` | usage and rate-limit records shared by ambient/background flows |
-| `jcode-auth-types` | provider-neutral auth state and credential metadata |
-| `jcode-background-types` | background-task status and progress DTOs |
-| `jcode-batch-types` | batch tool progress DTOs, currently depending only on message types internally |
-| `jcode-config-types` | stable configuration data contracts |
-| `jcode-core` | low-level utilities such as IDs, env helpers, fs helpers, stdin detection, and formatting |
-| `jcode-gateway-types` | gateway-facing data contracts |
-| `jcode-memory-types` | memory subsystem data contracts |
-| `jcode-message-types` | message content and transport-adjacent data contracts |
-| `jcode-protocol` | client/server protocol surface built from stable type crates and provider-core values |
-| `jcode-plan` | plan/task graph data model shared across coordination flows |
-| `jcode-selfdev-types` | self-development request/status data contracts |
-| `jcode-session-types` | session DTOs, currently depending only on message types internally |
-| `jcode-side-panel-types` | side-panel page and update data contracts |
-| `jcode-task-types` | task/tool scheduling data contracts |
-| `jcode-tool-core` | runtime tool contracts such as the `Tool` trait and execution context |
-| `jcode-tool-types` | stable tool output/image DTOs |
-| `jcode-usage-types` | usage accounting data contracts |
-| `jcode-storage` | storage helpers layered on `jcode-core` |
-| `jcode-embedding` | ONNX/tokenizer-based embedding implementation and heavy inference deps |
-| `jcode-pdf` | PDF text extraction |
-| `jcode-azure-auth` | Azure bearer token retrieval |
-| `jcode-notify-email` | SMTP/IMAP/mail transport |
-| `jcode-provider-metadata` | provider/login catalog and profile metadata |
-| `jcode-provider-core` | shared provider contract (`Provider`/`EventStream`), value types, route/cost/model helpers, shared HTTP client, schema helpers |
-| `jcode-provider-openrouter` | OpenRouter-specific catalog/cache/support helpers |
-| `jcode-provider-gemini` | Gemini schema/model/support helpers |
-| `jcode-tui-core` | low-level terminal UI primitives that do not need full app state |
-| `jcode-tui-markdown` | markdown wrapping/rendering, layered on mermaid/workspace support |
-| `jcode-tui-mermaid` | mermaid parsing, rendering, caching, viewport, and widget support |
-| `jcode-tui-render` | reusable TUI layout/render helpers |
-| `jcode-tui-workspace` | workspace-map data/model/widget rendering |
-| `jcode-terminal-launch` | terminal process launch helpers |
-| `jcode-desktop` | desktop app surface and session/workspace rendering experiments |
+| `daanio-agent-runtime` | shared interrupt and lightweight runtime primitives for agent execution |
+| `daanio-ambient-types` | usage and rate-limit records shared by ambient/background flows |
+| `daanio-auth-types` | provider-neutral auth state and credential metadata |
+| `daanio-background-types` | background-task status and progress DTOs |
+| `daanio-batch-types` | batch tool progress DTOs, currently depending only on message types internally |
+| `daanio-config-types` | stable configuration data contracts |
+| `daanio-core` | low-level utilities such as IDs, env helpers, fs helpers, stdin detection, and formatting |
+| `daanio-gateway-types` | gateway-facing data contracts |
+| `daanio-memory-types` | memory subsystem data contracts |
+| `daanio-message-types` | message content and transport-adjacent data contracts |
+| `daanio-protocol` | client/server protocol surface built from stable type crates and provider-core values |
+| `daanio-plan` | plan/task graph data model shared across coordination flows |
+| `daanio-selfdev-types` | self-development request/status data contracts |
+| `daanio-session-types` | session DTOs, currently depending only on message types internally |
+| `daanio-side-panel-types` | side-panel page and update data contracts |
+| `daanio-task-types` | task/tool scheduling data contracts |
+| `daanio-tool-core` | runtime tool contracts such as the `Tool` trait and execution context |
+| `daanio-tool-types` | stable tool output/image DTOs |
+| `daanio-usage-types` | usage accounting data contracts |
+| `daanio-storage` | storage helpers layered on `daanio-core` |
+| `daanio-embedding` | ONNX/tokenizer-based embedding implementation and heavy inference deps |
+| `daanio-pdf` | PDF text extraction |
+| `daanio-azure-auth` | Azure bearer token retrieval |
+| `daanio-notify-email` | SMTP/IMAP/mail transport |
+| `daanio-provider-metadata` | provider/login catalog and profile metadata |
+| `daanio-provider-core` | shared provider contract (`Provider`/`EventStream`), value types, route/cost/model helpers, shared HTTP client, schema helpers |
+| `daanio-provider-openrouter` | OpenRouter-specific catalog/cache/support helpers |
+| `daanio-provider-gemini` | Gemini schema/model/support helpers |
+| `daanio-tui-core` | low-level terminal UI primitives that do not need full app state |
+| `daanio-tui-markdown` | markdown wrapping/rendering, layered on mermaid/workspace support |
+| `daanio-tui-mermaid` | mermaid parsing, rendering, caching, viewport, and widget support |
+| `daanio-tui-render` | reusable TUI layout/render helpers |
+| `daanio-tui-workspace` | workspace-map data/model/widget rendering |
+| `daanio-terminal-launch` | terminal process launch helpers |
+| `daanio-desktop` | desktop app surface and session/workspace rendering experiments |
 
 These are already aligned with the compile-performance plan's strategy: isolate heavy dependencies and stable helper surfaces first.
 
@@ -159,7 +159,7 @@ This supports the current plan direction:
 
 ```mermaid
 flowchart TD
-  J[jcode root crate]
+  J[daanio root crate]
 
   J --> CLI[CLI and startup]
   J --> Server[Server orchestration]
@@ -170,16 +170,16 @@ flowchart TD
   J --> Coreish[Protocol, message, config, ids]
   J --> Product[Auth, memory, safety, ambient, notifications]
 
-  J --> AR[jcode-agent-runtime]
-  J --> Emb[jcode-embedding]
-  J --> PDF[jcode-pdf]
-  J --> Azure[jcode-azure-auth]
-  J --> Mail[jcode-notify-email]
-  J --> PMeta[jcode-provider-metadata]
-  J --> PCore[jcode-provider-core]
-  J --> POR[jcode-provider-openrouter]
-  J --> PGem[jcode-provider-gemini]
-  J --> TW[jcode-tui-workspace]
+  J --> AR[daanio-agent-runtime]
+  J --> Emb[daanio-embedding]
+  J --> PDF[daanio-pdf]
+  J --> Azure[daanio-azure-auth]
+  J --> Mail[daanio-notify-email]
+  J --> PMeta[daanio-provider-metadata]
+  J --> PCore[daanio-provider-core]
+  J --> POR[daanio-provider-openrouter]
+  J --> PGem[daanio-provider-gemini]
+  J --> TW[daanio-tui-workspace]
 ```
 
 ## Architectural Problems To Solve
@@ -224,33 +224,33 @@ The target is a layered workspace with a thin composition root. Arrows below mea
 
 ```mermaid
 flowchart TD
-  App[jcode top-level package]
+  App[daanio top-level package]
 
   subgraph L2[Layer 2: interfaces and product surfaces]
-    TUI[jcode-tui]
-    SelfDev[jcode-selfdev]
-    CLI[jcode-cli or root CLI modules]
+    TUI[daanio-tui]
+    SelfDev[daanio-selfdev]
+    CLI[daanio-cli or root CLI modules]
   end
 
   subgraph L1[Layer 1: domain/runtime]
-    Server[jcode-server]
-    Agent[jcode-agent]
-    Provider[jcode-provider]
-    Session[jcode-session]
+    Server[daanio-server]
+    Agent[daanio-agent]
+    Provider[daanio-provider]
+    Session[daanio-session]
   end
 
   subgraph L0[Layer 0: foundation and support]
-    Core[jcode-core]
-    AR[jcode-agent-runtime]
-    Emb[jcode-embedding]
-    PDF[jcode-pdf]
-    Azure[jcode-azure-auth]
-    Mail[jcode-notify-email]
-    PMeta[jcode-provider-metadata]
-    PCore[jcode-provider-core]
-    POR[jcode-provider-openrouter]
-    PGem[jcode-provider-gemini]
-    TW[jcode-tui-workspace]
+    Core[daanio-core]
+    AR[daanio-agent-runtime]
+    Emb[daanio-embedding]
+    PDF[daanio-pdf]
+    Azure[daanio-azure-auth]
+    Mail[daanio-notify-email]
+    PMeta[daanio-provider-metadata]
+    PCore[daanio-provider-core]
+    POR[daanio-provider-openrouter]
+    PGem[daanio-provider-gemini]
+    TW[daanio-tui-workspace]
   end
 
   App --> Server
@@ -311,14 +311,14 @@ These crates should be small, low-dependency, and slow-changing. They are allowe
 
 Existing examples:
 
-- `jcode-message-types`
-- `jcode-tool-types`
-- `jcode-session-types`
-- `jcode-config-types`
-- `jcode-protocol`
-- `jcode-provider-core`
-- `jcode-plan`
-- `jcode-*-types`
+- `daanio-message-types`
+- `daanio-tool-types`
+- `daanio-session-types`
+- `daanio-config-types`
+- `daanio-protocol`
+- `daanio-provider-core`
+- `daanio-plan`
+- `daanio-*-types`
 
 Target direction:
 
@@ -338,13 +338,13 @@ These own product behavior but should depend only downward on contracts/support 
 
 Target crates:
 
-- `jcode-provider`: provider composition, provider routing, streaming contract adapters, and concrete runtime implementations layered on the `jcode-provider-core` trait.
-- `jcode-agent`: turn loop, compaction orchestration, provider/tool interaction, recovery logic.
-- `jcode-session`: session model, state transitions, persistence-facing session operations.
-- `jcode-server`: daemon lifecycle, client attachment, swarm/background coordination, service registries.
-- `jcode-tools` or narrower `jcode-tool-core` plus `jcode-tool-impl`: tool registry contracts and tool implementations.
-- `jcode-auth`: root auth orchestration after provider-neutral data lives in `jcode-auth-types` and heavy leaf SDKs stay separate.
-- `jcode-memory`: memory graph/log/search orchestration once its contracts are stable enough.
+- `daanio-provider`: provider composition, provider routing, streaming contract adapters, and concrete runtime implementations layered on the `daanio-provider-core` trait.
+- `daanio-agent`: turn loop, compaction orchestration, provider/tool interaction, recovery logic.
+- `daanio-session`: session model, state transitions, persistence-facing session operations.
+- `daanio-server`: daemon lifecycle, client attachment, swarm/background coordination, service registries.
+- `daanio-tools` or narrower `daanio-tool-core` plus `daanio-tool-impl`: tool registry contracts and tool implementations.
+- `daanio-auth`: root auth orchestration after provider-neutral data lives in `daanio-auth-types` and heavy leaf SDKs stay separate.
+- `daanio-memory`: memory graph/log/search orchestration once its contracts are stable enough.
 
 Compile-time reason:
 
@@ -357,10 +357,10 @@ These are high-churn application surfaces and should sit above runtime/domain cr
 
 Target crates:
 
-- `jcode-cli`: parsing and command dispatch if CLI keeps growing.
-- `jcode-tui`: app state, reducers, key handling, command/input handling, UI orchestration.
-- `jcode-desktop`: already a separate surface.
-- `jcode-selfdev`: self-dev build/reload/customization workflows if they remain a substantial product surface.
+- `daanio-cli`: parsing and command dispatch if CLI keeps growing.
+- `daanio-tui`: app state, reducers, key handling, command/input handling, UI orchestration.
+- `daanio-desktop`: already a separate surface.
+- `daanio-selfdev`: self-dev build/reload/customization workflows if they remain a substantial product surface.
 
 Compile-time reason:
 
@@ -373,12 +373,12 @@ These should remain isolated and often feature-gated.
 
 Existing examples:
 
-- `jcode-embedding`
-- `jcode-pdf`
-- `jcode-azure-auth`
-- `jcode-notify-email`
-- `jcode-tui-mermaid`
-- provider support crates such as `jcode-provider-openrouter` and `jcode-provider-gemini`
+- `daanio-embedding`
+- `daanio-pdf`
+- `daanio-azure-auth`
+- `daanio-notify-email`
+- `daanio-tui-mermaid`
+- provider support crates such as `daanio-provider-openrouter` and `daanio-provider-gemini`
 
 Target direction:
 
@@ -393,7 +393,7 @@ Compile-time reason:
 
 #### 5. Composition package
 
-The top-level `jcode` package should eventually become mostly:
+The top-level `daanio` package should eventually become mostly:
 
 - binary entrypoints
 - feature defaults
@@ -408,23 +408,23 @@ It should not be the long-term home of large implementation modules.
 A healthy final graph should look like this:
 
 ```text
-jcode binary/composition
-  -> jcode-cli, jcode-tui, jcode-server, jcode-selfdev
+daanio binary/composition
+  -> daanio-cli, daanio-tui, daanio-server, daanio-selfdev
 
-jcode-cli / jcode-tui
-  -> jcode-protocol, jcode-*-types, jcode-server-client contracts
+daanio-cli / daanio-tui
+  -> daanio-protocol, daanio-*-types, daanio-server-client contracts
 
-jcode-server
-  -> jcode-agent, jcode-session, jcode-provider, jcode-tools, jcode-storage
+daanio-server
+  -> daanio-agent, daanio-session, daanio-provider, daanio-tools, daanio-storage
 
-jcode-agent
-  -> jcode-provider, jcode-tools, jcode-session, jcode-agent-runtime
+daanio-agent
+  -> daanio-provider, daanio-tools, daanio-session, daanio-agent-runtime
 
-jcode-provider
-  -> jcode-provider-core, jcode-provider-* leaves, jcode-auth-types
+daanio-provider
+  -> daanio-provider-core, daanio-provider-* leaves, daanio-auth-types
 
-jcode-session
-  -> jcode-session-types, jcode-message-types, jcode-storage, optional leaf adapters
+daanio-session
+  -> daanio-session-types, daanio-message-types, daanio-storage, optional leaf adapters
 
 contract/type crates
   -> serde and small support crates only
@@ -455,7 +455,7 @@ If these are not true yet, keep decomposing internally first.
 
 Avoid these tempting but harmful structures:
 
-- **One mega `jcode-common` crate.** It becomes the new root crate and invalidates everything.
+- **One mega `daanio-common` crate.** It becomes the new root crate and invalidates everything.
 - **One crate per source directory.** This creates noisy APIs and dependency cycles without compile wins.
 - **Moving high-churn traits too early.** A poorly stabilized trait crate can become worse than the monolith.
 - **Moving UI-adjacent state into core.** This contaminates lower layers with `ratatui`/terminal concepts.
@@ -466,12 +466,12 @@ Avoid these tempting but harmful structures:
 
 Based on the current root size and existing footholds, the best next work is probably:
 
-1. **Provider contracts:** keep shrinking `src/provider/mod.rs` until a `jcode-provider` trait/runtime crate can depend only on `jcode-message-types`, `jcode-provider-core`, and small runtime primitives.
+1. **Provider contracts:** keep shrinking `src/provider/mod.rs` until a `daanio-provider` trait/runtime crate can depend only on `daanio-message-types`, `daanio-provider-core`, and small runtime primitives.
 2. **Server core:** extract protocol-independent pieces of `src/server/` such as client lifecycle state machines, swarm/background coordination DTOs, and reload/update policies behind server-local contracts.
 3. **TUI reducer/state core:** extract non-rendering app state transitions from `src/tui/app/*` before moving the whole TUI crate.
 4. **Tool contracts and registry shape:** separate tool definitions, schemas, execution context, and registry metadata from individual tool implementations.
 5. **Session domain:** isolate session state transitions and persistence-facing operations from server/TUI/provider orchestration.
-6. **Auth facade:** keep provider-neutral auth data in `jcode-auth-types`, heavy SDKs in leaf crates, and move root auth orchestration only after provider contracts stabilize.
+6. **Auth facade:** keep provider-neutral auth data in `daanio-auth-types`, heavy SDKs in leaf crates, and move root auth orchestration only after provider contracts stabilize.
 
 A useful near-term policy: every time a large root file is touched, ask whether some pure table, DTO, parser, reducer, classifier, or state transition can move downward into an existing support crate without pulling runtime dependencies with it.
 
@@ -481,7 +481,7 @@ Each structural phase should record at least:
 
 - touched-file `cargo check` for the edited hotspot
 - touched-file selfdev build for the edited hotspot
-- `cargo tree -p jcode --edges normal --depth 1` before/after for dependency surprises
+- `cargo tree -p daanio --edges normal --depth 1` before/after for dependency surprises
 - crate-level test coverage for newly extracted crates
 
 A split is successful if it either:
@@ -494,7 +494,7 @@ A split should be reconsidered if it adds public API churn, creates cycles, or r
 
 ## Target crate responsibilities
 
-### `jcode-core`
+### `daanio-core`
 
 Purpose: stable shared types and utilities with minimal dependencies.
 
@@ -519,7 +519,7 @@ Notes:
 - This is the most important future extraction because it enables the rest.
 - `src/protocol.rs`, `src/id.rs`, and carefully selected parts of `config.rs` and `message.rs` are the likely first feeders.
 
-### `jcode-session`
+### `daanio-session`
 
 Purpose: session domain model, persistence, and state transitions.
 
@@ -540,9 +540,9 @@ Should not contain:
 Notes:
 
 - This crate is not explicitly named in the current compile-performance plan, but the current size and fanout of `src/session.rs` make session extraction a natural stabilizing move.
-- If introducing `jcode-session` feels too early, the same boundary should still be established internally first and extracted later.
+- If introducing `daanio-session` feels too early, the same boundary should still be established internally first and extracted later.
 
-### `jcode-provider`
+### `daanio-provider`
 
 Purpose: provider contracts and runtime-facing provider orchestration.
 
@@ -560,10 +560,10 @@ Should not contain:
 
 Notes:
 
-- Existing crates `jcode-provider-core`, `jcode-provider-metadata`, `jcode-provider-openrouter`, and `jcode-provider-gemini` remain useful under this layer.
+- Existing crates `daanio-provider-core`, `daanio-provider-metadata`, `daanio-provider-openrouter`, and `daanio-provider-gemini` remain useful under this layer.
 - The key migration step is shrinking the `Provider` trait's dependency surface so it no longer depends on root-crate-only message/runtime types.
 
-### `jcode-agent`
+### `daanio-agent`
 
 Purpose: agent turn engine and tool orchestration.
 
@@ -584,9 +584,9 @@ Should not contain:
 Notes:
 
 - This aligns directly with the refactoring roadmap's "Agent Turn-Loop Unification" phase.
-- `jcode-agent-runtime` remains the low-level runtime primitive crate below it.
+- `daanio-agent-runtime` remains the low-level runtime primitive crate below it.
 
-### `jcode-server`
+### `daanio-server`
 
 Purpose: daemon lifecycle and multi-client coordination.
 
@@ -602,14 +602,14 @@ Should not contain:
 
 - TUI rendering
 - provider implementation details beyond service interfaces
-- session persistence internals that belong in `jcode-session`
+- session persistence internals that belong in `daanio-session`
 
 Notes:
 
 - The current `src/server/` submodule tree is already the right shape for this extraction.
 - `src/server.rs` should continue shrinking into a facade/composition module.
 
-### `jcode-tui`
+### `daanio-tui`
 
 Purpose: client UI state, reducers, and rendering.
 
@@ -629,9 +629,9 @@ Should not contain:
 Notes:
 
 - This aligns directly with the refactoring roadmap's "TUI State/Reducer Split" phase.
-- `jcode-tui-workspace` can remain a leaf crate or become a child dependency of `jcode-tui`.
+- `daanio-tui-workspace` can remain a leaf crate or become a child dependency of `daanio-tui`.
 
-### `jcode-selfdev`
+### `daanio-selfdev`
 
 Purpose: self-dev workflows, customization records, reload/build productization.
 
@@ -650,7 +650,7 @@ Notes:
 
 - This aligns with the compile-performance plan's issue-#32 direction and with the already-unified shared-server model.
 
-### `jcode` top-level package
+### `daanio` top-level package
 
 Purpose: composition root and shipping product package.
 
@@ -682,16 +682,16 @@ A higher layer may depend on a lower layer. A lower layer may not depend on a hi
 
 ### Rule 3: No server daemon types in core or provider-support crates
 
-- socket/session attachment state, fanout senders, debug socket helpers, and daemon lifecycle code must not appear in `jcode-core`, `jcode-provider-core`, or provider leaf crates
+- socket/session attachment state, fanout senders, debug socket helpers, and daemon lifecycle code must not appear in `daanio-core`, `daanio-provider-core`, or provider leaf crates
 
 ### Rule 4: Provider implementation crates depend on contracts, not on the server or TUI
 
-- provider leaf crates may depend on `jcode-core`, `jcode-provider`, and `jcode-provider-core`
-- they must not depend on `jcode-server` or `jcode-tui`
+- provider leaf crates may depend on `daanio-core`, `daanio-provider`, and `daanio-provider-core`
+- they must not depend on `daanio-server` or `daanio-tui`
 
-### Rule 5: Async/network-heavy dependencies do not belong in `jcode-core`
+### Rule 5: Async/network-heavy dependencies do not belong in `daanio-core`
 
-`jcode-core` should stay cheap to compile and highly reusable.
+`daanio-core` should stay cheap to compile and highly reusable.
 
 Avoid putting these there unless absolutely necessary:
 
@@ -717,14 +717,14 @@ Do not create a dumping-ground crate.
 
 If code has a clear owner, it belongs with that owner:
 
-- protocol/data types -> `jcode-core`
-- session persistence -> `jcode-session`
+- protocol/data types -> `daanio-core`
+- session persistence -> `daanio-session`
 - provider route/schema helpers -> provider crates
-- rendering helpers -> `jcode-tui`
+- rendering helpers -> `daanio-tui`
 
 ### Rule 8: The root package may compose many crates, but peer crates should stay narrow
 
-The top-level `jcode` package can wire multiple domains together. Peer crates should not casually depend on each other sideways when a lower-level contract would do.
+The top-level `daanio` package can wire multiple domains together. Peer crates should not casually depend on each other sideways when a lower-level contract would do.
 
 ### Rule 9: New crate boundaries should follow both ownership and invalidation logic
 
@@ -743,15 +743,15 @@ This is the recommended direction from the current tree, not a one-shot move lis
 
 | Current area | Likely target |
 |---|---|
-| `src/id.rs`, protocol/message/config primitives | `jcode-core` |
-| `src/session.rs`, parts of `storage`, restart snapshot concerns | `jcode-session` |
-| `src/agent/*`, parts of `compaction`, tool orchestration seams | `jcode-agent` |
-| `src/server/` + shrinking `src/server.rs` facade | `jcode-server` |
-| `src/provider/mod.rs` trait/contracts plus provider composition seams | `jcode-provider` |
+| `src/id.rs`, protocol/message/config primitives | `daanio-core` |
+| `src/session.rs`, parts of `storage`, restart snapshot concerns | `daanio-session` |
+| `src/agent/*`, parts of `compaction`, tool orchestration seams | `daanio-agent` |
+| `src/server/` + shrinking `src/server.rs` facade | `daanio-server` |
+| `src/provider/mod.rs` trait/contracts plus provider composition seams | `daanio-provider` |
 | existing provider helper crates | remain leaf/provider support crates |
-| `src/tui/*` + `jcode-tui-workspace` | `jcode-tui` + leaf workspace widget crate |
-| `src/cli/*` | stay in root initially or become `jcode-cli` later if justified |
-| `src/tool/selfdev/*`, self-dev workflow/productization | `jcode-selfdev` |
+| `src/tui/*` + `daanio-tui-workspace` | `daanio-tui` + leaf workspace widget crate |
+| `src/cli/*` | stay in root initially or become `daanio-cli` later if justified |
+| `src/tool/selfdev/*`, self-dev workflow/productization | `daanio-selfdev` |
 
 ## Phased Migration Plan
 
@@ -786,7 +786,7 @@ Exit criteria:
 - root modules are organized by ownership, not by convenience
 - candidate extraction seams are obvious and lower-risk
 
-### Phase 2: Extract `jcode-core`
+### Phase 2: Extract `daanio-core`
 
 This is the highest-leverage shared boundary.
 
@@ -807,10 +807,10 @@ Exit criteria:
 
 Primary targets:
 
-1. `jcode-provider`
-2. `jcode-agent`
-3. `jcode-server`
-4. `jcode-session`
+1. `daanio-provider`
+2. `daanio-agent`
+3. `daanio-server`
+4. `daanio-session`
 
 Recommended order:
 
@@ -822,7 +822,7 @@ Exit criteria:
 
 - the root crate no longer defines the main provider, server, and agent contracts directly
 
-### Phase 4: Extract `jcode-tui`
+### Phase 4: Extract `daanio-tui`
 
 Focus:
 
@@ -835,7 +835,7 @@ Exit criteria:
 
 - TUI can evolve rapidly without dragging broad server/provider recompilation
 
-### Phase 5: Extract `jcode-selfdev`
+### Phase 5: Extract `daanio-selfdev`
 
 Focus:
 
@@ -852,7 +852,7 @@ Exit criteria:
 Desired end state:
 
 - `src/main.rs` remains thin
-- `jcode::run()` is mostly wiring
+- `daanio::run()` is mostly wiring
 - the top-level package primarily assembles runtime services and default product configuration
 
 ### Continuous work across all phases
@@ -908,10 +908,10 @@ Short version:
 
 These do not block the RFC, but they should be revisited as migration proceeds:
 
-- Should `jcode-session` become an explicit crate, or remain an internal boundary until later?
-- Should CLI remain in the top-level package permanently, or eventually become `jcode-cli`?
-- Should `message` and `protocol` remain together in `jcode-core`, or split into separate contract crates if they evolve at different rates?
-- Should `jcode-tui-workspace` remain a separate leaf crate long-term, or fold into `jcode-tui` once the larger TUI extraction lands?
+- Should `daanio-session` become an explicit crate, or remain an internal boundary until later?
+- Should CLI remain in the top-level package permanently, or eventually become `daanio-cli`?
+- Should `message` and `protocol` remain together in `daanio-core`, or split into separate contract crates if they evolve at different rates?
+- Should `daanio-tui-workspace` remain a separate leaf crate long-term, or fold into `daanio-tui` once the larger TUI extraction lands?
 
 ## Recommendation
 

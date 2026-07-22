@@ -1,17 +1,17 @@
 <#
 .SYNOPSIS
-    Uninstall jcode on Windows.
+    Uninstall daanio on Windows.
 .DESCRIPTION
-    Removes the per-user launcher at %LOCALAPPDATA%\jcode\bin\jcode.exe,
-    installed build binaries, and the jcode launcher directory from the user PATH.
-    By default user data under %USERPROFILE%\.jcode is kept.
+    Removes the per-user launcher at %LOCALAPPDATA%\daanio\bin\daanio.exe,
+    installed build binaries, and the daanio launcher directory from the user PATH.
+    By default user data under %USERPROFILE%\.daanio is kept.
 
     One-liner uninstall:
-      irm https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/uninstall.ps1 | iex
+      irm https://raw.githubusercontent.com/Daanio-CLI/daanio-cli/master/scripts/uninstall.ps1 | iex
 .PARAMETER InstallDir
-    Override the launcher directory (default: $env:LOCALAPPDATA\jcode\bin)
+    Override the launcher directory (default: $env:LOCALAPPDATA\daanio\bin)
 .PARAMETER Purge
-    Also delete user data in $env:JCODE_HOME or %USERPROFILE%\.jcode.
+    Also delete user data in $env:DAANIO_HOME or %USERPROFILE%\.daanio.
 .PARAMETER DryRun
     Print what would be removed without deleting anything.
 .PARAMETER Yes
@@ -30,7 +30,7 @@ function Write-Info($msg) { Write-Host $msg -ForegroundColor Blue }
 function Write-Err($msg) { throw "error: $msg" }
 function Write-Warn($msg) { Write-Host "warning: $msg" -ForegroundColor Yellow }
 
-function Get-JcodeLocalAppDataDir {
+function Get-DaanioLocalAppDataDir {
     if ($env:LOCALAPPDATA) { return $env:LOCALAPPDATA }
 
     $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
@@ -40,11 +40,11 @@ function Get-JcodeLocalAppDataDir {
     return (Join-Path ([Environment]::GetFolderPath("UserProfile")) "AppData\Local")
 }
 
-function Get-DefaultJcodeInstallDir {
-    return (Join-Path (Get-JcodeLocalAppDataDir) "jcode\bin")
+function Get-DefaultDaanioInstallDir {
+    return (Join-Path (Get-DaanioLocalAppDataDir) "daanio\bin")
 }
 
-function Get-JcodeRoamingAppDataDir {
+function Get-DaanioRoamingAppDataDir {
     if ($env:APPDATA) { return $env:APPDATA }
 
     $appData = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
@@ -54,20 +54,20 @@ function Get-JcodeRoamingAppDataDir {
     return (Join-Path ([Environment]::GetFolderPath("UserProfile")) "AppData\Roaming")
 }
 
-function Get-JcodeStartupShortcutPath {
-    return (Join-Path (Get-JcodeRoamingAppDataDir) "Microsoft\Windows\Start Menu\Programs\Startup\jcode-hotkey.lnk")
+function Get-DaanioStartupShortcutPath {
+    return (Join-Path (Get-DaanioRoamingAppDataDir) "Microsoft\Windows\Start Menu\Programs\Startup\daanio-hotkey.lnk")
 }
 
-function Get-JcodeHotkeyArtifactPaths([string]$UserDataDir) {
+function Get-DaanioHotkeyArtifactPaths([string]$UserDataDir) {
     $hotkeyDir = Join-Path $UserDataDir "hotkey"
     return @(
-        (Join-Path $hotkeyDir "jcode-hotkey.ps1"),
-        (Join-Path $hotkeyDir "jcode-hotkey-launcher.vbs"),
-        (Join-Path $hotkeyDir "jcode-hotkey-shortcut.ps1")
+        (Join-Path $hotkeyDir "daanio-hotkey.ps1"),
+        (Join-Path $hotkeyDir "daanio-hotkey-launcher.vbs"),
+        (Join-Path $hotkeyDir "daanio-hotkey-shortcut.ps1")
     )
 }
 
-function Clear-JcodeHotkeySetupState([string]$UserDataDir) {
+function Clear-DaanioHotkeySetupState([string]$UserDataDir) {
     $setupHintsPath = Join-Path $UserDataDir "setup_hints.json"
     if (-not (Test-Path -LiteralPath $setupHintsPath)) { return }
 
@@ -89,7 +89,7 @@ function Clear-JcodeHotkeySetupState([string]$UserDataDir) {
     }
 }
 
-function ConvertTo-JcodePathKey([string]$PathValue) {
+function ConvertTo-DaanioPathKey([string]$PathValue) {
     if (-not $PathValue) { return "" }
     $clean = [Environment]::ExpandEnvironmentVariables($PathValue.Trim().Trim('"'))
     if (-not $clean) { return "" }
@@ -98,13 +98,13 @@ function ConvertTo-JcodePathKey([string]$PathValue) {
     return $clean.ToUpperInvariant()
 }
 
-function Test-JcodeSafePurgePath([string]$PathValue) {
-    $pathKey = ConvertTo-JcodePathKey $PathValue
+function Test-DaanioSafePurgePath([string]$PathValue) {
+    $pathKey = ConvertTo-DaanioPathKey $PathValue
     if (-not $pathKey) { return $false }
 
     try {
         $fullPath = [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($PathValue.Trim().Trim('"')))
-        $rootKey = ConvertTo-JcodePathKey ([System.IO.Path]::GetPathRoot($fullPath))
+        $rootKey = ConvertTo-DaanioPathKey ([System.IO.Path]::GetPathRoot($fullPath))
         $leafName = [System.IO.Path]::GetFileName($fullPath.TrimEnd(
             [System.IO.Path]::DirectorySeparatorChar,
             [System.IO.Path]::AltDirectorySeparatorChar
@@ -113,7 +113,7 @@ function Test-JcodeSafePurgePath([string]$PathValue) {
         return $false
     }
 
-    if ($pathKey -eq $rootKey -or $leafName -notmatch '(?i)^\.?jcode(?:[-_ ].*)?$') {
+    if ($pathKey -eq $rootKey -or $leafName -notmatch '(?i)^\.?daanio(?:[-_ ].*)?$') {
         return $false
     }
 
@@ -125,7 +125,7 @@ function Test-JcodeSafePurgePath([string]$PathValue) {
         $env:APPDATA,
         [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
     )) {
-        $protectedKey = ConvertTo-JcodePathKey $protectedPath
+        $protectedKey = ConvertTo-DaanioPathKey $protectedPath
         if (-not $protectedKey) { continue }
         if ($pathKey -eq $protectedKey -or $protectedKey.StartsWith($pathKey + $separator, [System.StringComparison]::OrdinalIgnoreCase)) {
             return $false
@@ -135,20 +135,20 @@ function Test-JcodeSafePurgePath([string]$PathValue) {
     return $true
 }
 
-function Test-JcodeManagedExecutablePath([string]$ExecutablePath, [string]$LauncherPath, [string]$BuildsDir) {
-    $executableKey = ConvertTo-JcodePathKey $ExecutablePath
-    $launcherKey = ConvertTo-JcodePathKey $LauncherPath
-    $buildsKey = ConvertTo-JcodePathKey $BuildsDir
+function Test-DaanioManagedExecutablePath([string]$ExecutablePath, [string]$LauncherPath, [string]$BuildsDir) {
+    $executableKey = ConvertTo-DaanioPathKey $ExecutablePath
+    $launcherKey = ConvertTo-DaanioPathKey $LauncherPath
+    $buildsKey = ConvertTo-DaanioPathKey $BuildsDir
     if (-not $executableKey) { return $false }
     if ($launcherKey -and $executableKey -eq $launcherKey) { return $true }
 
     # A live upgrade may rename the loaded stable launcher before replacing it.
     # Treat only that tightly-scoped backup pattern in the launcher directory as
     # managed so uninstall can stop and remove it without touching other tools.
-    $launcherDirKey = ConvertTo-JcodePathKey (Split-Path -Parent $LauncherPath)
-    $executableDirKey = ConvertTo-JcodePathKey (Split-Path -Parent $ExecutablePath)
+    $launcherDirKey = ConvertTo-DaanioPathKey (Split-Path -Parent $LauncherPath)
+    $executableDirKey = ConvertTo-DaanioPathKey (Split-Path -Parent $ExecutablePath)
     $executableName = Split-Path -Leaf $ExecutablePath
-    if ($launcherDirKey -and $executableDirKey -eq $launcherDirKey -and $executableName -like '.jcode-launcher-old-*.exe') {
+    if ($launcherDirKey -and $executableDirKey -eq $launcherDirKey -and $executableName -like '.daanio-launcher-old-*.exe') {
         return $true
     }
 
@@ -156,7 +156,7 @@ function Test-JcodeManagedExecutablePath([string]$ExecutablePath, [string]$Launc
     return [bool]($buildsKey -and $executableKey.StartsWith($buildsKey + $separator, [System.StringComparison]::OrdinalIgnoreCase))
 }
 
-function Split-JcodePathList([string]$PathValue) {
+function Split-DaanioPathList([string]$PathValue) {
     if (-not $PathValue) { return @() }
     $entries = @()
     foreach ($entry in ($PathValue -split ';')) {
@@ -166,32 +166,32 @@ function Split-JcodePathList([string]$PathValue) {
     return $entries
 }
 
-function Join-JcodePathList([string[]]$Entries) {
+function Join-DaanioPathList([string[]]$Entries) {
     if (-not $Entries -or $Entries.Count -eq 0) { return "" }
     return ($Entries -join ';')
 }
 
-function Get-JcodeManagedPathKeys([string]$InstallDir) {
+function Get-DaanioManagedPathKeys([string]$InstallDir) {
     $keys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($candidate in @($InstallDir, (Get-DefaultJcodeInstallDir))) {
-        $key = ConvertTo-JcodePathKey $candidate
+    foreach ($candidate in @($InstallDir, (Get-DefaultDaanioInstallDir))) {
+        $key = ConvertTo-DaanioPathKey $candidate
         if ($key) { [void]$keys.Add($key) }
     }
     return $keys
 }
 
-function Resolve-JcodePathRemoval {
+function Resolve-DaanioPathRemoval {
     param(
         [Parameter(Mandatory = $true)][string]$InstallDir,
         [AllowNull()][string]$CurrentPath
     )
 
-    $managedKeys = Get-JcodeManagedPathKeys -InstallDir $InstallDir
+    $managedKeys = Get-DaanioManagedPathKeys -InstallDir $InstallDir
     $nextEntries = @()
     $removedManaged = 0
 
-    foreach ($entry in (Split-JcodePathList $CurrentPath)) {
-        $key = ConvertTo-JcodePathKey $entry
+    foreach ($entry in (Split-DaanioPathList $CurrentPath)) {
+        $key = ConvertTo-DaanioPathKey $entry
         if (-not $key) { continue }
         if ($managedKeys.Contains($key)) {
             $removedManaged += 1
@@ -200,7 +200,7 @@ function Resolve-JcodePathRemoval {
         $nextEntries += $entry
     }
 
-    $nextPath = Join-JcodePathList $nextEntries
+    $nextPath = Join-DaanioPathList $nextEntries
     return [pscustomobject]@{
         Path = $nextPath
         Changed = ($nextPath -ne ([string]$CurrentPath))
@@ -209,13 +209,13 @@ function Resolve-JcodePathRemoval {
     }
 }
 
-function Send-JcodeEnvironmentChangedBroadcast {
-    if ($env:JCODE_DISABLE_ENV_BROADCAST -eq "1") { return $false }
-    if (-not ("Jcode.EnvironmentBroadcast" -as [type])) {
+function Send-DaanioEnvironmentChangedBroadcast {
+    if ($env:DAANIO_DISABLE_ENV_BROADCAST -eq "1") { return $false }
+    if (-not ("Daanio.EnvironmentBroadcast" -as [type])) {
         Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
-namespace Jcode {
+namespace Daanio {
     public static class EnvironmentBroadcast {
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         public static extern IntPtr SendMessageTimeout(
@@ -231,11 +231,11 @@ namespace Jcode {
 "@
     }
     $result = [UIntPtr]::Zero
-    [Jcode.EnvironmentBroadcast]::SendMessageTimeout([IntPtr]0xffff, 0x001A, [UIntPtr]::Zero, "Environment", 0x0002, 5000, [ref]$result) | Out-Null
+    [Daanio.EnvironmentBroadcast]::SendMessageTimeout([IntPtr]0xffff, 0x001A, [UIntPtr]::Zero, "Environment", 0x0002, 5000, [ref]$result) | Out-Null
     return $true
 }
 
-function Remove-JcodeUserPath {
+function Remove-DaanioUserPath {
     param(
         [Parameter(Mandatory = $true)][string]$InstallDir,
         [AllowNull()][string]$CurrentPath,
@@ -248,7 +248,7 @@ function Remove-JcodeUserPath {
         $CurrentPath = [Environment]::GetEnvironmentVariable("Path", "User")
     }
 
-    $update = Resolve-JcodePathRemoval -InstallDir $InstallDir -CurrentPath $CurrentPath
+    $update = Resolve-DaanioPathRemoval -InstallDir $InstallDir -CurrentPath $CurrentPath
     $broadcasted = $false
     if ($update.Changed) {
         if ($SetUserPathAction) {
@@ -258,7 +258,7 @@ function Remove-JcodeUserPath {
         }
 
         if ($Broadcast) {
-            if ($BroadcastAction) { & $BroadcastAction | Out-Null } else { Send-JcodeEnvironmentChangedBroadcast | Out-Null }
+            if ($BroadcastAction) { & $BroadcastAction | Out-Null } else { Send-DaanioEnvironmentChangedBroadcast | Out-Null }
             $broadcasted = $true
         }
     }
@@ -267,7 +267,7 @@ function Remove-JcodeUserPath {
 }
 
 
-function Invoke-JcodeUninstall {
+function Invoke-DaanioUninstall {
     param(
         [string]$InstallDir,
         [switch]$Purge,
@@ -275,28 +275,28 @@ function Invoke-JcodeUninstall {
         [switch]$Yes
     )
 
-if (-not $InstallDir) { $InstallDir = Get-DefaultJcodeInstallDir }
+if (-not $InstallDir) { $InstallDir = Get-DefaultDaanioInstallDir }
 
-$localJcodeRoot = Join-Path (Get-JcodeLocalAppDataDir) "jcode"
-$launcherPath = Join-Path $InstallDir "jcode.exe"
-$buildsDir = Join-Path $localJcodeRoot "builds"
-$userDataDir = if ($env:JCODE_HOME) {
-    $env:JCODE_HOME
+$localDaanioRoot = Join-Path (Get-DaanioLocalAppDataDir) "daanio"
+$launcherPath = Join-Path $InstallDir "daanio.exe"
+$buildsDir = Join-Path $localDaanioRoot "builds"
+$userDataDir = if ($env:DAANIO_HOME) {
+    $env:DAANIO_HOME
 } elseif ($env:USERPROFILE) {
-    Join-Path $env:USERPROFILE ".jcode"
+    Join-Path $env:USERPROFILE ".daanio"
 } else {
-    Join-Path ([Environment]::GetFolderPath("UserProfile")) ".jcode"
+    Join-Path ([Environment]::GetFolderPath("UserProfile")) ".daanio"
 }
-$startupShortcutPath = Get-JcodeStartupShortcutPath
-$hotkeyArtifactPaths = @(Get-JcodeHotkeyArtifactPaths -UserDataDir $userDataDir)
+$startupShortcutPath = Get-DaanioStartupShortcutPath
+$hotkeyArtifactPaths = @(Get-DaanioHotkeyArtifactPaths -UserDataDir $userDataDir)
 $launcherBackupPaths = if (Test-Path -LiteralPath $InstallDir) {
-    @(Get-ChildItem -LiteralPath $InstallDir -Filter '.jcode-launcher-old-*.exe' -File -Force -ErrorAction SilentlyContinue |
+    @(Get-ChildItem -LiteralPath $InstallDir -Filter '.daanio-launcher-old-*.exe' -File -Force -ErrorAction SilentlyContinue |
         ForEach-Object { $_.FullName })
 } else {
     @()
 }
-if ($Purge -and -not (Test-JcodeSafePurgePath $userDataDir)) {
-    Write-Err "Refusing to purge unsafe JCODE_HOME path '$userDataDir'. Use a dedicated .jcode or jcode-* directory."
+if ($Purge -and -not (Test-DaanioSafePurgePath $userDataDir)) {
+    Write-Err "Refusing to purge unsafe DAANIO_HOME path '$userDataDir'. Use a dedicated .daanio or daanio-* directory."
 }
 
 $targets = @()
@@ -309,13 +309,13 @@ foreach ($path in $hotkeyArtifactPaths) {
 }
 if ($Purge -and (Test-Path -LiteralPath $userDataDir)) { $targets += "$userDataDir (user data)" }
 
-$userPathPreview = Resolve-JcodePathRemoval -InstallDir $InstallDir -CurrentPath ([Environment]::GetEnvironmentVariable("Path", "User"))
+$userPathPreview = Resolve-DaanioPathRemoval -InstallDir $InstallDir -CurrentPath ([Environment]::GetEnvironmentVariable("Path", "User"))
 if ($userPathPreview.RemovedManagedEntries -gt 0) {
     $targets += "$InstallDir (user PATH entry)"
 }
 
 if ($targets.Count -eq 0) {
-    Write-Info "Nothing to uninstall: no jcode installation found."
+    Write-Info "Nothing to uninstall: no daanio installation found."
     return 0
 }
 
@@ -339,8 +339,8 @@ if (-not $Yes) {
 }
 
 try {
-    $managedProcessIds = @(Get-CimInstance Win32_Process -Filter "Name = 'jcode.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { Test-JcodeManagedExecutablePath -ExecutablePath $_.ExecutablePath -LauncherPath $launcherPath -BuildsDir $buildsDir } |
+    $managedProcessIds = @(Get-CimInstance Win32_Process -Filter "Name = 'daanio.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { Test-DaanioManagedExecutablePath -ExecutablePath $_.ExecutablePath -LauncherPath $launcherPath -BuildsDir $buildsDir } |
         ForEach-Object { $_.ProcessId })
     foreach ($processId in $managedProcessIds) {
         $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
@@ -367,7 +367,7 @@ if (-not $Purge) {
     if (Test-Path -LiteralPath $hotkeyDir) {
         Remove-Item -LiteralPath $hotkeyDir -Force -ErrorAction SilentlyContinue
     }
-    Clear-JcodeHotkeySetupState -UserDataDir $userDataDir
+    Clear-DaanioHotkeySetupState -UserDataDir $userDataDir
 }
 
 if (Test-Path -LiteralPath $launcherPath) {
@@ -387,7 +387,7 @@ if (Test-Path -LiteralPath $InstallDir) {
 }
 
 if ($Purge) {
-    foreach ($path in @($localJcodeRoot, $userDataDir)) {
+    foreach ($path in @($localDaanioRoot, $userDataDir)) {
         if ($path -and (Test-Path -LiteralPath $path)) {
             Remove-Item -LiteralPath $path -Recurse -Force
             Write-Info "Removed $path"
@@ -398,20 +398,20 @@ if ($Purge) {
     Write-Info "Removed $buildsDir"
 }
 
-$pathUpdate = Remove-JcodeUserPath -InstallDir $InstallDir
+$pathUpdate = Remove-DaanioUserPath -InstallDir $InstallDir
 if ($pathUpdate.Changed) {
-    Write-Info "Removed $($pathUpdate.RemovedManagedEntries) jcode entr$(if ($pathUpdate.RemovedManagedEntries -eq 1) { 'y' } else { 'ies' }) from user PATH"
+    Write-Info "Removed $($pathUpdate.RemovedManagedEntries) daanio entr$(if ($pathUpdate.RemovedManagedEntries -eq 1) { 'y' } else { 'ies' }) from user PATH"
 }
 
-Write-Info "jcode uninstalled."
-Write-Info "Reinstall with: irm https://jcode.sh/install.ps1 | iex"
+Write-Info "daanio uninstalled."
+Write-Info "Reinstall with: irm https://daanio.com/install.ps1 | iex"
 
 
     return 0
 }
 
-if ($env:JCODE_UNINSTALL_PS1_IMPORT_ONLY -ne "1") {
-    $exitCode = Invoke-JcodeUninstall -InstallDir $InstallDir -Purge:$Purge -DryRun:$DryRun -Yes:$Yes
+if ($env:DAANIO_UNINSTALL_PS1_IMPORT_ONLY -ne "1") {
+    $exitCode = Invoke-DaanioUninstall -InstallDir $InstallDir -Purge:$Purge -DryRun:$DryRun -Yes:$Yes
     if ($null -ne $exitCode -and [int]$exitCode -ne 0) {
         if ($MyInvocation.MyCommand.Path) { exit ([int]$exitCode) }
         $global:LASTEXITCODE = [int]$exitCode

@@ -124,7 +124,7 @@ pub async fn run_tui_client(
         );
     } else {
         crate::process_title::set_client_generic_title(super::selfdev::client_selfdev_requested());
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::SetTitle("jcode"));
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::SetTitle("daanio"));
     }
     startup_profile::mark("terminal_title");
 
@@ -249,7 +249,7 @@ pub async fn run_replay_command(
                         }
                     })
                     .collect::<String>();
-                std::path::PathBuf::from(format!("jcode_swarm_replay_{}_{}.mp4", safe_name, date))
+                std::path::PathBuf::from(format!("daanio_swarm_replay_{}_{}.mp4", safe_name, date))
             } else {
                 std::path::PathBuf::from(output)
             };
@@ -365,7 +365,7 @@ pub async fn run_replay_command(
                     }
                 })
                 .collect::<String>();
-            std::path::PathBuf::from(format!("jcode_replay_{}_{}.mp4", safe_name, date))
+            std::path::PathBuf::from(format!("daanio_replay_{}_{}.mp4", safe_name, date))
         } else {
             std::path::PathBuf::from(output)
         };
@@ -428,42 +428,42 @@ pub use crate::session_launch::{
 pub fn list_sessions() -> Result<()> {
     fn build_resume_target_command(
         exe: &std::path::Path,
-        target: &jcode_tui_session_picker::ResumeTarget,
+        target: &daanio_tui_session_picker::ResumeTarget,
     ) -> (std::path::PathBuf, Vec<String>) {
         match target {
-            jcode_tui_session_picker::ResumeTarget::JcodeSession { session_id } => (
+            daanio_tui_session_picker::ResumeTarget::DaanioSession { session_id } => (
                 exe.to_path_buf(),
                 vec!["--resume".to_string(), session_id.clone()],
             ),
-            jcode_tui_session_picker::ResumeTarget::ClaudeCodeSession { session_id, .. } => (
+            daanio_tui_session_picker::ResumeTarget::ClaudeCodeSession { session_id, .. } => (
                 exe.to_path_buf(),
                 vec![
                     "--resume".to_string(),
                     crate::import::imported_claude_code_session_id(session_id),
                 ],
             ),
-            jcode_tui_session_picker::ResumeTarget::CodexSession { session_id, .. } => (
+            daanio_tui_session_picker::ResumeTarget::CodexSession { session_id, .. } => (
                 exe.to_path_buf(),
                 vec![
                     "--resume".to_string(),
                     crate::import::imported_codex_session_id(session_id),
                 ],
             ),
-            jcode_tui_session_picker::ResumeTarget::PiSession { session_path } => (
+            daanio_tui_session_picker::ResumeTarget::PiSession { session_path } => (
                 exe.to_path_buf(),
                 vec![
                     "--resume".to_string(),
                     crate::import::imported_pi_session_id(session_path),
                 ],
             ),
-            jcode_tui_session_picker::ResumeTarget::OpenCodeSession { session_id, .. } => (
+            daanio_tui_session_picker::ResumeTarget::OpenCodeSession { session_id, .. } => (
                 exe.to_path_buf(),
                 vec![
                     "--resume".to_string(),
                     crate::import::imported_opencode_session_id(session_id),
                 ],
             ),
-            jcode_tui_session_picker::ResumeTarget::CursorSession { session_id, .. } => (
+            daanio_tui_session_picker::ResumeTarget::CursorSession { session_id, .. } => (
                 exe.to_path_buf(),
                 vec![
                     "--resume".to_string(),
@@ -481,22 +481,22 @@ pub fn list_sessions() -> Result<()> {
     }
 
     fn spawn_target_in_new_terminal(
-        target: &jcode_tui_session_picker::ResumeTarget,
+        target: &daanio_tui_session_picker::ResumeTarget,
         exe: &std::path::Path,
         cwd: &std::path::Path,
     ) -> Result<bool> {
         let (program, args) = build_resume_target_command(exe, target);
         let title = match target {
-            jcode_tui_session_picker::ResumeTarget::JcodeSession { session_id } => {
+            daanio_tui_session_picker::ResumeTarget::DaanioSession { session_id } => {
                 resumed_window_title(session_id)
             }
-            jcode_tui_session_picker::ResumeTarget::ClaudeCodeSession { session_id, .. } => {
+            daanio_tui_session_picker::ResumeTarget::ClaudeCodeSession { session_id, .. } => {
                 format!("🧵 Claude Code {}", &session_id[..session_id.len().min(8)])
             }
-            jcode_tui_session_picker::ResumeTarget::CodexSession { session_id, .. } => {
+            daanio_tui_session_picker::ResumeTarget::CodexSession { session_id, .. } => {
                 format!("🧠 Codex {}", &session_id[..session_id.len().min(8)])
             }
-            jcode_tui_session_picker::ResumeTarget::PiSession { session_path } => {
+            daanio_tui_session_picker::ResumeTarget::PiSession { session_path } => {
                 format!(
                     "π Pi {}",
                     std::path::Path::new(session_path)
@@ -505,10 +505,10 @@ pub fn list_sessions() -> Result<()> {
                         .unwrap_or("session")
                 )
             }
-            jcode_tui_session_picker::ResumeTarget::OpenCodeSession { session_id, .. } => {
+            daanio_tui_session_picker::ResumeTarget::OpenCodeSession { session_id, .. } => {
                 format!("◌ OpenCode {}", &session_id[..session_id.len().min(8)])
             }
-            jcode_tui_session_picker::ResumeTarget::CursorSession { session_id, .. } => {
+            daanio_tui_session_picker::ResumeTarget::CursorSession { session_id, .. } => {
                 format!("▮ Cursor {}", &session_id[..session_id.len().min(8)])
             }
         };
@@ -519,10 +519,10 @@ pub fn list_sessions() -> Result<()> {
     match tui::session_picker::pick_session()? {
         Some(tui::session_picker::PickerResult::TakeOverClaude(target)) => {
             let resolved_target = crate::import::take_over_live_claude_session(&target)?;
-            let jcode_tui_session_picker::ResumeTarget::JcodeSession { session_id } =
+            let daanio_tui_session_picker::ResumeTarget::DaanioSession { session_id } =
                 &resolved_target
             else {
-                anyhow::bail!("Claude takeover did not produce a Jcode session");
+                anyhow::bail!("Claude takeover did not produce a Daanio session");
             };
             let exe = std::env::current_exe()?;
             let mut session_cwd = std::env::current_dir()?;
@@ -549,9 +549,9 @@ pub fn list_sessions() -> Result<()> {
 
             if targets.len() == 1 {
                 let target = &targets[0];
-                let resolved_target = crate::import::resolve_resume_target_to_jcode(target)?;
+                let resolved_target = crate::import::resolve_resume_target_to_daanio(target)?;
                 let mut session_cwd = cwd.clone();
-                if let jcode_tui_session_picker::ResumeTarget::JcodeSession { session_id } =
+                if let daanio_tui_session_picker::ResumeTarget::DaanioSession { session_id } =
                     &resolved_target
                     && let Ok(sess) = session::Session::load(session_id)
                     && let Some(dir) = sess.working_dir.as_deref()
@@ -573,7 +573,7 @@ pub fn list_sessions() -> Result<()> {
 
                 for target in targets {
                     let resolved_target =
-                        match crate::import::resolve_resume_target_to_jcode(&target) {
+                        match crate::import::resolve_resume_target_to_daanio(&target) {
                             Ok(target) => target,
                             Err(e) => {
                                 eprintln!("Failed to import selected session: {}", e);
@@ -581,7 +581,7 @@ pub fn list_sessions() -> Result<()> {
                             }
                         };
                     let mut session_cwd = cwd.clone();
-                    if let jcode_tui_session_picker::ResumeTarget::JcodeSession { session_id } =
+                    if let daanio_tui_session_picker::ResumeTarget::DaanioSession { session_id } =
                         &resolved_target
                         && let Ok(sess) = session::Session::load(session_id)
                         && let Some(dir) = sess.working_dir.as_deref()
@@ -627,7 +627,8 @@ pub fn list_sessions() -> Result<()> {
             let mut warned_no_terminal = false;
 
             for target in targets {
-                let resolved_target = match crate::import::resolve_resume_target_to_jcode(&target) {
+                let resolved_target = match crate::import::resolve_resume_target_to_daanio(&target)
+                {
                     Ok(target) => target,
                     Err(e) => {
                         eprintln!("Failed to import selected session: {}", e);
@@ -635,7 +636,7 @@ pub fn list_sessions() -> Result<()> {
                     }
                 };
                 let mut session_cwd = cwd.clone();
-                if let jcode_tui_session_picker::ResumeTarget::JcodeSession { session_id } =
+                if let daanio_tui_session_picker::ResumeTarget::DaanioSession { session_id } =
                     &resolved_target
                     && let Ok(sess) = session::Session::load(session_id)
                     && let Some(dir) = sess.working_dir.as_deref()
@@ -709,7 +710,7 @@ pub fn list_sessions() -> Result<()> {
                             );
                             warned_no_terminal = true;
                         }
-                        eprintln!("  jcode --resume {}", session_id);
+                        eprintln!("  daanio --resume {}", session_id);
                     }
                     Err(e) => {
                         eprintln!("Failed to spawn session {}: {}", session_id, e);

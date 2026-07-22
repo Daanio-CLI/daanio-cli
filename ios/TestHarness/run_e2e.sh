@@ -16,9 +16,9 @@ cd "$(dirname "$0")/.."        # ios/
 HARNESS="TestHarness"
 DEVICE="iPhone 17"
 PUSH_DEMO=""
-BUNDLE_ID="com.jcode.mobile"
+BUNDLE_ID="com.daanio.mobile"
 PORT=7643
-SHOT_DIR="${TMPDIR:-/tmp}/jcode-ios-e2e"
+SHOT_DIR="${TMPDIR:-/tmp}/daanio-ios-e2e"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -45,11 +45,11 @@ swift test 2>&1 | tail -1
 log "xcodegen + xcodebuild ($DEVICE)"
 xcodegen generate >/dev/null
 xcodebuild build \
-  -project JCodeMobile.xcodeproj \
-  -scheme JCodeMobile \
+  -project DaanioMobile.xcodeproj \
+  -scheme DaanioMobile \
   -destination "platform=iOS Simulator,name=$DEVICE" \
   -derivedDataPath .build-ios >/dev/null
-APP=".build-ios/Build/Products/Debug-iphonesimulator/JCodeMobile.app"
+APP=".build-ios/Build/Products/Debug-iphonesimulator/DaanioMobile.app"
 
 # 3. Start the deterministic mock gateway.
 log "starting mock gateway on :$PORT $PUSH_DEMO"
@@ -77,8 +77,8 @@ CONTAINER="$(xcrun simctl get_app_container "$DEVICE" "$BUNDLE_ID" data)"
 APPSUP="$CONTAINER/Library/Application Support"
 mkdir -p "$APPSUP"
 printf '%s\n' \
-  '[{"host":"127.0.0.1","port":7643,"token":"mocktoken0123456789abcdef","serverName":"mock-jcode","serverVersion":"mock-0.32.0","pairedAt":770000000}]' \
-  > "$APPSUP/jcode-servers.json"
+  '[{"host":"127.0.0.1","port":7643,"token":"mocktoken0123456789abcdef","serverName":"mock-daanio","serverVersion":"mock-0.32.0","pairedAt":770000000}]' \
+  > "$APPSUP/daanio-servers.json"
 
 # 7. Launch + screenshot.
 log "launching app"

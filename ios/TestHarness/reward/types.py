@@ -1,4 +1,4 @@
-"""Shared types for the jcode iOS UX reward framework.
+"""Shared types for the daanio iOS UX reward framework.
 
 These are the only data structures scorers and the aggregator share. Keep this
 module tiny and dependency-light so every scorer can import it freely.

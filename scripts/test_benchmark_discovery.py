@@ -135,7 +135,7 @@ class DiscoveryBenchmarkTests(unittest.TestCase):
 
     def test_parse_selection_tracks_but_does_not_count_direct_selection(self):
         call = benchmark.parse_discovery_output(
-            "Selected 'agentmail' from 'email-messaging' (Jcode tool directory):", 1.5
+            "Selected 'agentmail' from 'email-messaging' (Daanio tool directory):", 1.5
         )
         self.assertEqual(call.category, "email-messaging")
         self.assertEqual(call.tools, ["agentmail"])

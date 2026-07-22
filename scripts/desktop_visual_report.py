@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Visual reporting tool for jcode-desktop debug frames.
+"""Visual reporting tool for daanio-desktop debug frames.
 
 Composes gallery frame captures into filmstrips, animated GIFs, and
 before/after pixel-diff reports. Requires python3 + Pillow only.
@@ -270,7 +270,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Filmstrip/GIF/diff reporting for jcode-desktop frame captures."
+        description="Filmstrip/GIF/diff reporting for daanio-desktop frame captures."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

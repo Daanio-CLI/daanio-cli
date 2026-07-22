@@ -104,7 +104,7 @@
     "t": 22211,
     "event": "tool_done",
     "name": "batch",
-    "output": "--- [1] bash ---\n/home/jeremy/jcode\n./figma/jcode-mobile-design-spec.md:102:- `jcode-mobile-mockup.svg` gives a fast importable preview\n./Cargo.toml:4:description = \"Possibly the greatest coding agent ever built \u2014 blazing-fast TUI, multi-model, swarm coordination, 30+ tools\"\n./RELEASING.md:3:jcode has two release paths: a fast local path for hotfixes, and CI for full releases.\n./RELEASING.md:74:- **mold linker** on Linux for faster linking.\n./RELEASING.md:93:For quick releases that also nee...",
+    "output": "--- [1] bash ---\n/home/jeremy/daanio\n./figma/daanio-mobile-design-spec.md:102:- `daanio-mobile-mockup.svg` gives a fast importable preview\n./Cargo.toml:4:description = \"Possibly the greatest coding agent ever built \u2014 blazing-fast TUI, multi-model, swarm coordination, 30+ tools\"\n./RELEASING.md:3:daanio has two release paths: a fast local path for hotfixes, and CI for full releases.\n./RELEASING.md:74:- **mold linker** on Linux for faster linking.\n./RELEASING.md:93:For quick releases that also nee...",
     "is_error": false
   },
   {
@@ -1070,7 +1070,7 @@
     "t": 72077,
     "event": "tool_done",
     "name": "batch",
-    "output": "--- [1] bash ---\nCommand completed successfully (no output)\n\n--- [2] bash ---\n\nrunning 1 test\ntest provider::openai::tests::test_service_tier_can_be_changed_while_a_request_snapshot_is_held ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1147 filtered out; finished in 0.04s\n\n\n    Blocking waiting for file lock on package cache\n   Compiling jcode v0.6.1 (/home/jeremy/jcode)\nwarning: method `build_system_prompt` is never used\n  --> src/agent/prompt_support.rs:24:19\n   |\n 5 |...",
+    "output": "--- [1] bash ---\nCommand completed successfully (no output)\n\n--- [2] bash ---\n\nrunning 1 test\ntest provider::openai::tests::test_service_tier_can_be_changed_while_a_request_snapshot_is_held ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1147 filtered out; finished in 0.04s\n\n\n    Blocking waiting for file lock on package cache\n   Compiling daanio v0.6.1 (/home/jeremy/daanio)\nwarning: method `build_system_prompt` is never used\n  --> src/agent/prompt_support.rs:24:19\n   |\n 5 |...",
     "is_error": false
   },
   {
@@ -1081,7 +1081,7 @@
   {
     "t": 73877,
     "event": "stream_text",
-    "text": "Targeted tests passed. I\u2019m doing the required release build now; because this is jcode itself, I\u2019ll reload onto the new binary afterward. I\u2019m not auto-committing here because the worktree already has a lot of unrelated edits, and I don\u2019t want to accidentally sweep those into a commit.",
+    "text": "Targeted tests passed. I\u2019m doing the required release build now; because this is daanio itself, I\u2019ll reload onto the new binary afterward. I\u2019m not auto-committing here because the worktree already has a lot of unrelated edits, and I don\u2019t want to accidentally sweep those into a commit.",
     "speed": 80
   },
   {
@@ -1108,7 +1108,7 @@
     "t": 74992,
     "event": "tool_done",
     "name": "bash",
-    "output": "Command started in background.\n\nTask ID: 076911y3sg\nOutput file: /tmp/jcode-bg-tasks/076911y3sg.output\nStatus file: /tmp/jcode-bg-tasks/076911y3sg.status.json\n\nYou will be notified when the task completes.\nTo check progress: use the `bg` tool with action=\"status\" and task_id=\"076911y3sg\"\nTo see output: use the `read` tool on the output file, or `bg` with action=\"output\"",
+    "output": "Command started in background.\n\nTask ID: 076911y3sg\nOutput file: /tmp/daanio-bg-tasks/076911y3sg.output\nStatus file: /tmp/daanio-bg-tasks/076911y3sg.status.json\n\nYou will be notified when the task completes.\nTo check progress: use the `bg` tool with action=\"status\" and task_id=\"076911y3sg\"\nTo see output: use the `read` tool on the output file, or `bg` with action=\"output\"",
     "is_error": false
   },
   {
@@ -1234,7 +1234,7 @@
     "t": 83354,
     "event": "tool_done",
     "name": "bg",
-    "output": "[stderr]    Compiling jcode v0.6.1 (/home/jeremy/jcode)\n[stderr] warning: method `build_system_prompt` is never used\n[stderr]   --> src/agent/prompt_support.rs:24:19\n[stderr]    |\n[stderr]  5 | impl Agent {\n[stderr]    | ---------- method in this implementation\n[stderr] ...\n[stderr] 24 |     pub(super) fn build_system_prompt(&self, memory_prompt: Option<&str>) -> String {\n[stderr]    |                   ^^^^^^^^^^^^^^^^^^^\n[stderr]    |\n[stderr]    = note: `#[warn(dead_code)]` (part of `#[war...",
+    "output": "[stderr]    Compiling daanio v0.6.1 (/home/jeremy/daanio)\n[stderr] warning: method `build_system_prompt` is never used\n[stderr]   --> src/agent/prompt_support.rs:24:19\n[stderr]    |\n[stderr]  5 | impl Agent {\n[stderr]    | ---------- method in this implementation\n[stderr] ...\n[stderr] 24 |     pub(super) fn build_system_prompt(&self, memory_prompt: Option<&str>) -> String {\n[stderr]    |                   ^^^^^^^^^^^^^^^^^^^\n[stderr]    |\n[stderr]    = note: `#[warn(dead_code)]` (part of `#[war...",
     "is_error": false
   },
   {
@@ -1390,7 +1390,7 @@
     "t": 93910,
     "event": "tool_done",
     "name": "bg",
-    "output": "[stderr]    Compiling jcode v0.6.1 (/home/jeremy/jcode)\n[stderr] warning: method `build_system_prompt` is never used\n[stderr]   --> src/agent/prompt_support.rs:24:19\n[stderr]    |\n[stderr]  5 | impl Agent {\n[stderr]    | ---------- method in this implementation\n[stderr] ...\n[stderr] 24 |     pub(super) fn build_system_prompt(&self, memory_prompt: Option<&str>) -> String {\n[stderr]    |                   ^^^^^^^^^^^^^^^^^^^\n[stderr]    |\n[stderr]    = note: `#[warn(dead_code)]` (part of `#[war...",
+    "output": "[stderr]    Compiling daanio v0.6.1 (/home/jeremy/daanio)\n[stderr] warning: method `build_system_prompt` is never used\n[stderr]   --> src/agent/prompt_support.rs:24:19\n[stderr]    |\n[stderr]  5 | impl Agent {\n[stderr]    | ---------- method in this implementation\n[stderr] ...\n[stderr] 24 |     pub(super) fn build_system_prompt(&self, memory_prompt: Option<&str>) -> String {\n[stderr]    |                   ^^^^^^^^^^^^^^^^^^^\n[stderr]    |\n[stderr]    = note: `#[warn(dead_code)]` (part of `#[war...",
     "is_error": false
   },
   {
@@ -1537,7 +1537,7 @@
     "event": "tool_start",
     "name": "bash",
     "input": {
-      "command": "tail -n 20 /tmp/jcode-bg-tasks/076911y3sg.output",
+      "command": "tail -n 20 /tmp/daanio-bg-tasks/076911y3sg.output",
       "description": "Check build output tail",
       "notify": false,
       "run_in_background": false,

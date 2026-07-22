@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Summarize Jcode Desktop persistent performance logs.
+"""Summarize Daanio Desktop persistent performance logs.
 
-The desktop app writes JSONL events to ~/.cache/jcode/desktop/performance.log.
+The desktop app writes JSONL events to ~/.cache/daanio/desktop/performance.log.
 This helper groups events by launch_id when available, reports the latest run by
 default, and ranks the largest no-paint gaps, frame stalls, event queue delays,
 and background disk work.
@@ -24,8 +24,8 @@ DEFAULT_TOP = 8
 def default_log_path() -> Path:
     xdg = os.environ.get("XDG_CACHE_HOME")
     if xdg:
-        return Path(xdg) / "jcode" / "desktop" / "performance.log"
-    return Path.home() / ".cache" / "jcode" / "desktop" / "performance.log"
+        return Path(xdg) / "daanio" / "desktop" / "performance.log"
+    return Path.home() / ".cache" / "daanio" / "desktop" / "performance.log"
 
 
 def ms(value: Any) -> float:
@@ -133,13 +133,13 @@ def summarize(events: list[dict[str, Any]], scope: str, malformed: int, top: int
     build_hashes = sorted({event.get("build_hash") for event in events if isinstance(event.get("build_hash"), str)})
     pids = sorted({event.get("pid") for event in events if isinstance(event.get("pid"), int)})
 
-    no_paint = top_events(events, "jcode-desktop-no-paint-profile", ("payload", "gap_ms"), top)
-    frames = top_events(events, "jcode-desktop-frame-profile", ("payload", "worst_wall_ms"), top)
-    session_events = top_events(events, "jcode-desktop-session-event-profile", ("payload", "ui_queue_delay_ms"), top)
-    card_loads = top_events(events, "jcode-desktop-session-cards-load-profile", ("payload", "loaded_in_ms"), top)
-    single_card_loads = top_events(events, "jcode-desktop-session-card-refresh-profile", ("payload", "loaded_in_ms"), top)
-    preference_saves = top_events(events, "jcode-desktop-preferences-save-profile", ("payload", "saved_in_ms"), top)
-    restores = top_events(events, "jcode-desktop-crashed-sessions-restore-profile", ("payload", "elapsed_ms"), top)
+    no_paint = top_events(events, "daanio-desktop-no-paint-profile", ("payload", "gap_ms"), top)
+    frames = top_events(events, "daanio-desktop-frame-profile", ("payload", "worst_wall_ms"), top)
+    session_events = top_events(events, "daanio-desktop-session-event-profile", ("payload", "ui_queue_delay_ms"), top)
+    card_loads = top_events(events, "daanio-desktop-session-cards-load-profile", ("payload", "loaded_in_ms"), top)
+    single_card_loads = top_events(events, "daanio-desktop-session-card-refresh-profile", ("payload", "loaded_in_ms"), top)
+    preference_saves = top_events(events, "daanio-desktop-preferences-save-profile", ("payload", "saved_in_ms"), top)
+    restores = top_events(events, "daanio-desktop-crashed-sessions-restore-profile", ("payload", "elapsed_ms"), top)
 
     worst_frame_details = []
     for event in frames:
@@ -239,7 +239,7 @@ def summarize(events: list[dict[str, Any]], scope: str, malformed: int, top: int
 
 
 def print_text(summary: dict[str, Any], path: Path) -> None:
-    print("Jcode Desktop performance report")
+    print("Daanio Desktop performance report")
     print(f"log: {path}")
     print(f"scope: {summary['scope']}")
     print(f"events: {summary['events']} malformed_lines: {summary['malformed_lines']}")

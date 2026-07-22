@@ -144,7 +144,7 @@ def main():
     check("pair 200", st == 200)
     token = p.get("token", "")
     check("pair returns token", bool(token))
-    check("pair server_name", p.get("server_name") == "mock-jcode")
+    check("pair server_name", p.get("server_name") == "mock-daanio")
 
     # 4. ws connect + subscribe + history
     s = ws_connect(args.host, args.port, token)

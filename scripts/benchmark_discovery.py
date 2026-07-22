@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Live benchmark for proactive sponsored Discovery triggering.
 
-The runner starts an isolated Jcode server marked with
-JCODE_DISCOVERY_BENCHMARK=1, verifies that every live catalog listing has a
+The runner starts an isolated Daanio server marked with
+DAANIO_DISCOVERY_BENCHMARK=1, verifies that every live catalog listing has a
 natural-language positive benchmark case, then evaluates both expected listing
 hits and no-Discovery controls.
 
@@ -32,9 +32,9 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CASES = REPO_ROOT / "scripts" / "discovery_benchmark_cases.json"
 DEFAULT_OUTPUT = REPO_ROOT / "target" / "discovery-benchmark" / "latest.json"
-CATEGORY_SOURCE = REPO_ROOT / "crates" / "jcode-base" / "src" / "sponsors.rs"
-BENCHMARK_ENV = "JCODE_DISCOVERY_BENCHMARK"
-BENCHMARK_HEADER = "x-jcode-discovery-benchmark"
+CATEGORY_SOURCE = REPO_ROOT / "crates" / "daanio-base" / "src" / "sponsors.rs"
+BENCHMARK_ENV = "DAANIO_DISCOVERY_BENCHMARK"
+BENCHMARK_HEADER = "x-daanio-discovery-benchmark"
 LISTING_RE = re.compile(r"Discoverable tools in '([^']+)'")
 EMPTY_RE = re.compile(r"No discoverable tools in category '([^']+)'")
 SELECTION_RE = re.compile(r"Selected '([^']+)' from '([^']+)'")
@@ -93,9 +93,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=90.0, help="Seconds allowed per model attempt.")
     parser.add_argument("--catalog-retries", type=int, default=4)
     parser.add_argument("--retry-delay", type=float, default=0.5)
-    parser.add_argument("--jcode", default=os.environ.get("JCODE_BIN", "jcode"))
-    parser.add_argument("--model", default=os.environ.get("JCODE_DISCOVERY_BENCHMARK_MODEL", "gpt-5.6-sol"))
-    parser.add_argument("--provider", default=os.environ.get("JCODE_DISCOVERY_BENCHMARK_PROVIDER"))
+    parser.add_argument("--daanio", default=os.environ.get("DAANIO_BIN", "daanio"))
+    parser.add_argument("--model", default=os.environ.get("DAANIO_DISCOVERY_BENCHMARK_MODEL", "gpt-5.6-sol"))
+    parser.add_argument("--provider", default=os.environ.get("DAANIO_DISCOVERY_BENCHMARK_PROVIDER"))
     parser.add_argument(
         "--discovery-only",
         action="store_true",
@@ -324,7 +324,7 @@ def benchmark_environment(socket_path: Path) -> dict[str, str]:
     return {
         **os.environ,
         BENCHMARK_ENV: "1",
-        "JCODE_RUNTIME_DIR": str(socket_path.parent),
+        "DAANIO_RUNTIME_DIR": str(socket_path.parent),
     }
 
 
@@ -336,7 +336,7 @@ def run_debug_command(
     session_id: str | None = None,
     timeout: float = 30,
 ) -> str:
-    invocation = [args.jcode, "--socket", str(socket_path), "debug"]
+    invocation = [args.daanio, "--socket", str(socket_path), "debug"]
     if session_id:
         invocation += ["-S", session_id]
     invocation.append(command)
@@ -354,7 +354,7 @@ def run_debug_command(
     return result.stdout.strip()
 
 
-def fetch_catalog_via_jcode(
+def fetch_catalog_via_daanio(
     args: argparse.Namespace,
     socket_path: Path,
     workdir: Path,
@@ -420,7 +420,7 @@ def fetch_catalog_via_jcode(
 
 def run_attempt(args: argparse.Namespace, case: BenchmarkCase, attempt: int, socket_path: Path, workdir: Path) -> AttemptResult:
     command = [
-        args.jcode,
+        args.daanio,
         "--socket",
         str(socket_path),
         "--no-selfdev",
@@ -528,7 +528,7 @@ def run_attempt(args: argparse.Namespace, case: BenchmarkCase, attempt: int, soc
 
 def progress(current: int, total: int, unit: str, message: str) -> None:
     print(
-        "JCODE_PROGRESS "
+        "DAANIO_PROGRESS "
         + json.dumps(
             {
                 "current": current,
@@ -545,7 +545,7 @@ def progress(current: int, total: int, unit: str, message: str) -> None:
 def start_server(args: argparse.Namespace, socket_path: Path) -> subprocess.Popen[str]:
     socket_path.unlink(missing_ok=True)
     command = [
-        args.jcode,
+        args.daanio,
         "--socket",
         str(socket_path),
         "--no-selfdev",
@@ -570,7 +570,7 @@ def start_server(args: argparse.Namespace, socket_path: Path) -> subprocess.Pope
     while time.monotonic() < deadline:
         try:
             probe = subprocess.run(
-                [args.jcode, "--socket", str(socket_path), "debug", "server:info"],
+                [args.daanio, "--socket", str(socket_path), "debug", "server:info"],
                 capture_output=True,
                 text=True,
                 env=environment,
@@ -593,7 +593,7 @@ def stop_server(args: argparse.Namespace, socket_path: Path, process: subprocess
     try:
         try:
             subprocess.run(
-                [args.jcode, "--socket", str(socket_path), "server", "stop"],
+                [args.daanio, "--socket", str(socket_path), "server", "stop"],
                 capture_output=True,
                 text=True,
                 env=benchmark_environment(socket_path),
@@ -741,9 +741,9 @@ def main() -> int:
                 f"missing cases={coverage['missing_cases']}, stale cases={coverage['stale_cases']}"
             )
     else:
-        with tempfile.TemporaryDirectory(prefix="jcode-discovery-benchmark-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="daanio-discovery-benchmark-") as temp_dir:
             temporary_root = Path(temp_dir)
-            socket_path = temporary_root / "jcode.sock"
+            socket_path = temporary_root / "daanio.sock"
             workdir = temporary_root / "workspace"
             workdir.mkdir()
             server_process = start_server(args, socket_path)
@@ -751,7 +751,7 @@ def main() -> int:
                 catalog = (
                     load_catalog_file(args.catalog_file, categories)
                     if args.catalog_file
-                    else fetch_catalog_via_jcode(args, socket_path, workdir, categories)
+                    else fetch_catalog_via_daanio(args, socket_path, workdir, categories)
                 )
                 coverage = validate_catalog_coverage(all_cases, catalog)
                 mismatch = bool(coverage["missing_cases"] or coverage["stale_cases"])

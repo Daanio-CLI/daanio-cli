@@ -31,7 +31,7 @@ Status values:
   - Started 2026-03-24: extracted feature modules `session_flow`, `transport`, `provider_behavior`, `binary_integration`, `safety`, and `ambient`
   - Completed 2026-03-24: extracted shared helpers into `tests/e2e/test_support/mod.rs`
   - Verified 2026-05-18: `tests/e2e/main.rs` is now only the feature-module entry point and the full non-ignored e2e target passed 44/44 tests.
-- [ ] Continue splitting `src/server.rs` into focused submodules ([#53](https://github.com/1jehuang/jcode/issues/53))
+- [ ] Continue splitting `src/server.rs` into focused submodules ([#53](https://github.com/Daanio-CLI/daanio-cli/issues/53))
   - Progress 2026-03-24: extracted shared server/swarm state into `src/server/state.rs`
   - Progress 2026-03-24: extracted socket/bootstrap helpers into `src/server/socket.rs`
   - Progress 2026-03-24: extracted reload marker/signal state into `src/server/reload_state.rs`
@@ -39,17 +39,17 @@ Status values:
 - [ ] Split `src/agent.rs` into orchestration, stream, interrupt, and tool-exec modules
 
 ### Next wave
-- [ ] Split `src/provider/mod.rs` into traits, pricing, routes, and shared HTTP helpers ([#52](https://github.com/1jehuang/jcode/issues/52))
-- [ ] Split `src/provider/openai.rs` into request, stream, tool, and response modules ([#52](https://github.com/1jehuang/jcode/issues/52))
-- [ ] Split `src/tui/ui.rs` by render responsibility ([#51](https://github.com/1jehuang/jcode/issues/51))
-- [ ] Split `src/tui/info_widget.rs` by widget/domain sections ([#51](https://github.com/1jehuang/jcode/issues/51))
+- [ ] Split `src/provider/mod.rs` into traits, pricing, routes, and shared HTTP helpers ([#52](https://github.com/Daanio-CLI/daanio-cli/issues/52))
+- [ ] Split `src/provider/openai.rs` into request, stream, tool, and response modules ([#52](https://github.com/Daanio-CLI/daanio-cli/issues/52))
+- [ ] Split `src/tui/ui.rs` by render responsibility ([#51](https://github.com/Daanio-CLI/daanio-cli/issues/51))
+- [ ] Split `src/tui/info_widget.rs` by widget/domain sections ([#51](https://github.com/Daanio-CLI/daanio-cli/issues/51))
 
 ## Phase 3: Error Handling Hardening
 
 - [ ] Count production `unwrap` / `expect` separately from test-only usages
 - [ ] Replace easy production `unwrap` / `expect` hotspots with explicit errors
 - [ ] Add better error context for provider stream parsing failures
-- [ ] Add better error context for reload and socket lifecycle failures ([#53](https://github.com/1jehuang/jcode/issues/53))
+- [ ] Add better error context for reload and socket lifecycle failures ([#53](https://github.com/Daanio-CLI/daanio-cli/issues/53))
 
 ## Phase 4: Test Strategy Improvements
 
@@ -368,7 +368,7 @@ Generated from `docs/CODE_QUALITY_AUDIT_2026-04-18.md`. This section enumerates 
 - [ ] Harden `src/safety.rs` (`unwrap`: 2, `expect`: 1, `panic!`: 1, `todo!`: 0, `unimplemented!`: 0, total: 4)
 - [ ] Harden `src/login_qr.rs` (`unwrap`: 3, `expect`: 1, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 4)
 - [ ] Harden `src/channel.rs` (`unwrap`: 4, `expect`: 0, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 4)
-- [ ] Harden `crates/jcode-tui-workspace/src/workspace_map.rs` (`unwrap`: 0, `expect`: 4, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 4)
+- [ ] Harden `crates/daanio-tui-workspace/src/workspace_map.rs` (`unwrap`: 0, `expect`: 4, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 4)
 - [ ] Harden `src/tui/ui_messages.rs` (`unwrap`: 0, `expect`: 3, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 3)
 - [ ] Harden `src/tui/ui_header.rs` (`unwrap`: 0, `expect`: 2, `panic!`: 0, `todo!`: 0, `unimplemented!`: 1, total: 3)
 - [ ] Harden `src/tui/login_picker.rs` (`unwrap`: 0, `expect`: 3, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 3)
@@ -378,7 +378,7 @@ Generated from `docs/CODE_QUALITY_AUDIT_2026-04-18.md`. This section enumerates 
 - [ ] Harden `src/server/comm_plan.rs` (`unwrap`: 0, `expect`: 3, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 3)
 - [ ] Harden `src/cli/terminal.rs` (`unwrap`: 2, `expect`: 0, `panic!`: 1, `todo!`: 0, `unimplemented!`: 0, total: 3)
 - [ ] Harden `src/bin/tui_bench.rs` (`unwrap`: 0, `expect`: 3, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 3)
-- [ ] Harden `crates/jcode-provider-openrouter/src/lib.rs` (`unwrap`: 0, `expect`: 3, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 3)
+- [ ] Harden `crates/daanio-provider-openrouter/src/lib.rs` (`unwrap`: 0, `expect`: 3, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 3)
 - [ ] Harden `src/video_export.rs` (`unwrap`: 0, `expect`: 2, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 2)
 - [ ] Harden `src/tui/ui_animations.rs` (`unwrap`: 0, `expect`: 0, `panic!`: 2, `todo!`: 0, `unimplemented!`: 0, total: 2)
 - [ ] Harden `src/tui/backend.rs` (`unwrap`: 0, `expect`: 1, `panic!`: 1, `todo!`: 0, `unimplemented!`: 0, total: 2)
@@ -388,7 +388,7 @@ Generated from `docs/CODE_QUALITY_AUDIT_2026-04-18.md`. This section enumerates 
 - [ ] Harden `src/server/client_disconnect_cleanup.rs` (`unwrap`: 0, `expect`: 2, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 2)
 - [ ] Harden `src/server/client_comm_channels.rs` (`unwrap`: 0, `expect`: 2, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 2)
 - [ ] Harden `src/provider/openrouter_sse_stream.rs` (`unwrap`: 0, `expect`: 2, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 2)
-- [ ] Harden `src/provider/jcode.rs` (`unwrap`: 0, `expect`: 2, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 2)
+- [ ] Harden `src/provider/daanio.rs` (`unwrap`: 0, `expect`: 2, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 2)
 - [ ] Harden `src/perf.rs` (`unwrap`: 2, `expect`: 0, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 2)
 - [ ] Harden `src/memory/activity.rs` (`unwrap`: 0, `expect`: 2, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 2)
 - [ ] Harden `src/mcp/pool.rs` (`unwrap`: 0, `expect`: 0, `panic!`: 2, `todo!`: 0, `unimplemented!`: 0, total: 2)
@@ -427,7 +427,7 @@ Generated from `docs/CODE_QUALITY_AUDIT_2026-04-18.md`. This section enumerates 
 - [ ] Harden `src/config.rs` (`unwrap`: 0, `expect`: 1, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 1)
 - [ ] Harden `src/background.rs` (`unwrap`: 0, `expect`: 1, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 1)
 - [ ] Harden `src/ambient/scheduler.rs` (`unwrap`: 1, `expect`: 0, `panic!`: 0, `todo!`: 0, `unimplemented!`: 0, total: 1)
-- [ ] Harden `crates/jcode-tui-workspace/src/color_support.rs` (`unwrap`: 0, `expect`: 0, `panic!`: 1, `todo!`: 0, `unimplemented!`: 0, total: 1)
+- [ ] Harden `crates/daanio-tui-workspace/src/color_support.rs` (`unwrap`: 0, `expect`: 0, `panic!`: 1, `todo!`: 0, `unimplemented!`: 0, total: 1)
 
 ### Suppression cleanup backlog
 

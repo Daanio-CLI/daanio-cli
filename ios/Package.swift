@@ -2,22 +2,22 @@
 import PackageDescription
 
 let package = Package(
-    name: "JCodeKit",
+    name: "DaanioKit",
     platforms: [
         .iOS(.v17),
         .macOS(.v14),
     ],
     products: [
-        .library(name: "JCodeKit", targets: ["JCodeKit"])
+        .library(name: "DaanioKit", targets: ["DaanioKit"])
     ],
     targets: [
         .target(
-            name: "JCodeKit",
+            name: "DaanioKit",
             swiftSettings: [.enableUpcomingFeature("StrictConcurrency")]
         ),
         .testTarget(
-            name: "JCodeKitTests",
-            dependencies: ["JCodeKit"]
+            name: "DaanioKitTests",
+            dependencies: ["DaanioKit"]
         ),
     ]
 )

@@ -1,6 +1,6 @@
 -- Current UTC-day and trailing-24h DAU dashboard.
 -- Usage:
---   wrangler d1 execute jcode-telemetry --remote --file=dau.sql
+--   wrangler d1 execute daanio-telemetry --remote --file=dau.sql
 --
 -- Note: production `events` never got migration 0005's per-turn columns (D1
 -- caps tables at 100 columns), so turn_end activity lives in `turn_details`

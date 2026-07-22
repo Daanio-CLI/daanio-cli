@@ -1,13 +1,13 @@
-name = "jcode-telemetry"
+name = "daanio-telemetry"
 main = "src/worker.js"
 compatibility_date = "2025-01-01"
 
-# Custom domain for the website beacon (jcode-website public/beacon.js posts
+# Custom domain for the website beacon (daanio-website public/beacon.js posts
 # here). Managed as a Workers custom domain, so Cloudflare creates the DNS
 # record and certificate automatically on deploy.
 routes = [
   { pattern = "telemetry.solosystems.dev", custom_domain = true },
-  { pattern = "telemetry.jcode.sh", custom_domain = true }
+  { pattern = "telemetry.daanio.com", custom_domain = true }
 ]
 
 # Nightly retention prune (see RETENTION_DAYS in src/worker.js). D1 hard-caps
@@ -18,7 +18,7 @@ crons = ["17 4 * * *"]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "jcode-telemetry"
+database_name = "daanio-telemetry"
 database_id = "abaa524c-3e90-4ba9-a569-027e78a083c6"
 
 # High-volume firehose: every event is also written to Workers Analytics
@@ -36,7 +36,7 @@ database_id = "abaa524c-3e90-4ba9-a569-027e78a083c6"
 # (responses report firehose:false). After enabling, uncomment and redeploy.
 [[analytics_engine_datasets]]
 binding = "FIREHOSE"
-dataset = "jcode_telemetry_firehose"
+dataset = "daanio_telemetry_firehose"
 
 # Web/subscription firehose (FIREHOSE_WEB_SCHEMA in src/worker.js). The main
 # FIREHOSE_SCHEMA is at Analytics Engine's 20-blob/20-double capacity, so
@@ -44,19 +44,19 @@ dataset = "jcode_telemetry_firehose"
 # caveat as above; the worker degrades gracefully without the binding.
 [[analytics_engine_datasets]]
 binding = "FIREHOSE_WEB"
-dataset = "jcode_web_firehose"
+dataset = "daanio_web_firehose"
 
 # Privacy-safe sponsored-discovery funnel and reliability telemetry. A separate
 # dataset avoids repurposing the full main firehose schema.
 [[analytics_engine_datasets]]
 binding = "FIREHOSE_DISCOVERY"
-dataset = "jcode_discovery_firehose"
+dataset = "daanio_discovery_firehose"
 
 # Complete website -> installer -> first-run conversion reconstruction. This
 # remains queryable for roughly 90 days even during a D1 size-cap incident.
 [[analytics_engine_datasets]]
 binding = "FIREHOSE_INSTALL"
-dataset = "jcode_install_firehose"
+dataset = "daanio_install_firehose"
 
 [vars]
 ALLOWED_ORIGIN = "*"

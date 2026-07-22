@@ -1,4 +1,4 @@
-# Contributing to jcode
+# Contributing to daanio
 
 Thanks for contributing.
 

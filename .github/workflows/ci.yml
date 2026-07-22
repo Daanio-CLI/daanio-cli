@@ -185,12 +185,12 @@ jobs:
       - name: Run deterministic retention-readiness cohort
         shell: bash
         run: |
-          # A cold jcode-app-core test harness compiles heavy optional provider
+          # A cold daanio-app-core test harness compiles heavy optional provider
           # dependencies and can exceed three minutes on hosted runners. The
           # cohort itself runs in under a second once the lib test is built.
           python3 .github/scripts/run_with_timeout.py 600 \
             "$(rustup which cargo)" test --target ${{ matrix.target }} \
-            -p jcode-app-core --lib retention_readiness -- --nocapture
+            -p daanio-app-core --lib retention_readiness -- --nocapture
 
       - name: Compile integration test binaries
         shell: bash
@@ -329,12 +329,12 @@ jobs:
           & ./scripts/invoke_cargo_with_timeout.ps1 `
             -Name 'Windows setup-hints tests' `
             -TimeoutSeconds 300 `
-            -CargoArgs @('test', '--locked', '--target', 'x86_64-pc-windows-msvc', '-p', 'jcode-setup-hints', '--lib', '--', '--nocapture')
+            -CargoArgs @('test', '--locked', '--target', 'x86_64-pc-windows-msvc', '-p', 'daanio-setup-hints', '--lib', '--', '--nocapture')
 
           & ./scripts/invoke_cargo_with_timeout.ps1 `
             -Name 'Windows power-inhibit tests' `
             -TimeoutSeconds 900 `
-            -CargoArgs @('test', '--locked', '--target', 'x86_64-pc-windows-msvc', '-p', 'jcode-base', '--no-default-features', '--lib', 'power_inhibit::tests::windows_', '--', '--nocapture')
+            -CargoArgs @('test', '--locked', '--target', 'x86_64-pc-windows-msvc', '-p', 'daanio-base', '--no-default-features', '--lib', 'power_inhibit::tests::windows_', '--', '--nocapture')
 
       - name: Run Windows e2e smoke tests
         shell: pwsh
@@ -354,9 +354,9 @@ jobs:
       - name: Run Windows lifecycle e2e tests
         shell: pwsh
         env:
-          JCODE_E2E_ARTIFACT_DIR: ${{ runner.temp }}/jcode-windows-e2e-logs
+          DAANIO_E2E_ARTIFACT_DIR: ${{ runner.temp }}/daanio-windows-e2e-logs
         run: |
-          New-Item -ItemType Directory -Force -Path $env:JCODE_E2E_ARTIFACT_DIR | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:DAANIO_E2E_ARTIFACT_DIR | Out-Null
           $tests = @(
             'windows_lifecycle::windows_binary_server_accepts_clients_and_debug_cli',
             'windows_lifecycle::windows_binary_server_rebinds_named_pipe_after_exit'
@@ -373,13 +373,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-e2e-diagnostics
-          path: ${{ runner.temp }}/jcode-windows-e2e-logs
+          path: ${{ runner.temp }}/daanio-windows-e2e-logs
           if-no-files-found: ignore
 
       - name: Verify built binary launches
         shell: pwsh
         run: |
-          & "target/x86_64-pc-windows-msvc/release/jcode.exe" --version
+          & "target/x86_64-pc-windows-msvc/release/daanio.exe" --version
           if ($LASTEXITCODE -ne 0) {
             throw 'Built Windows binary failed to run --version'
           }
@@ -402,7 +402,7 @@ jobs:
           # this identity from the root package version and appends `-dev`.
           $version = 'v' + $cargoVersion.Matches[0].Groups[1].Value + '-dev'
           & ./.github/scripts/verify_windows_install.ps1 `
-            -ArtifactExePath 'target/x86_64-pc-windows-msvc/release/jcode.exe' `
+            -ArtifactExePath 'target/x86_64-pc-windows-msvc/release/daanio.exe' `
             -Version $version
 
   fmt:

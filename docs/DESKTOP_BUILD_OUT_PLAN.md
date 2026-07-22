@@ -1,11 +1,11 @@
-# Jcode Desktop Build-Out Plan
+# Daanio Desktop Build-Out Plan
 
 Status: Active planning note
 Updated: 2026-05-25
 
 ## Current read
 
-Jcode Desktop has moved past the original blank-canvas prototype. The strongest current thread is a single-session desktop surface with a local GitHub issue browser/cache and background `gh` sync. Recent work added:
+Daanio Desktop has moved past the original blank-canvas prototype. The strongest current thread is a single-session desktop surface with a local GitHub issue browser/cache and background `gh` sync. Recent work added:
 
 - issue-browser renderer extraction
 - issue-browser interactions
@@ -43,7 +43,7 @@ Build next:
 
 Verification:
 
-- `cargo test -p jcode-desktop issue --no-default-features`
+- `cargo test -p daanio-desktop issue --no-default-features`
 - fake `gh` runner tests for auth/missing CLI/comment failures
 - UI snapshot/layout tests for empty, syncing, error, and narrow-width states
 

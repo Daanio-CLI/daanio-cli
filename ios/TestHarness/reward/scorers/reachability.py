@@ -1,7 +1,7 @@
 """B. reachability - is the PRIMARY action in the comfortable thumb zone?
 
 On a phone held one-handed, the thumb comfortably reaches the bottom of the
-screen; the top corners are the hardest to hit. The primary action in jcode is
+screen; the top corners are the hardest to hit. The primary action in daanio is
 the composer send button, which should live in the bottom-right thumb zone, not
 stranded at the top.
 

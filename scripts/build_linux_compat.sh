@@ -17,10 +17,10 @@ if [[ "$out_dir" != /* ]]; then
   out_dir="$repo_root/$out_dir"
 fi
 
-artifact="${JCODE_COMPAT_ARTIFACT:-jcode-linux-x86_64}"
-profile="${JCODE_COMPAT_PROFILE:-release}"
-image="${JCODE_COMPAT_IMAGE:-quay.io/pypa/manylinux2014_x86_64}"
-cache_root="${JCODE_COMPAT_CACHE_DIR:-$HOME/.cache/jcode-linux-compat}"
+artifact="${DAANIO_COMPAT_ARTIFACT:-daanio-linux-x86_64}"
+profile="${DAANIO_COMPAT_PROFILE:-release}"
+image="${DAANIO_COMPAT_IMAGE:-quay.io/pypa/manylinux2014_x86_64}"
+cache_root="${DAANIO_COMPAT_CACHE_DIR:-$HOME/.cache/daanio-linux-compat}"
 target="x86_64-unknown-linux-gnu"
 
 mkdir -p "$out_dir" \
@@ -32,8 +32,8 @@ host_uid="$(id -u)"
 host_gid="$(id -g)"
 
 # Compute git build metadata on the HOST and hand it to the container via a
-# metadata file (read by jcode-build-meta/build.rs through
-# JCODE_BUILD_METADATA_FILE). The repo is bind-mounted into the container and
+# metadata file (read by daanio-build-meta/build.rs through
+# DAANIO_BUILD_METADATA_FILE). The repo is bind-mounted into the container and
 # owned by the host UID while git inside the container runs as root, so any
 # in-container `git` call trips git's "dubious ownership" guard
 # (CVE-2022-24765) and fails. That previously zeroed out the embedded git hash,
@@ -65,7 +65,7 @@ trap 'rm -f "$metadata_file"' EXIT
   printf 'git_date=%s\n' "$git_date"
   printf 'git_tag=%s\n' "$git_tag"
   printf 'git_dirty=%s\n' "$git_dirty"
-  printf 'changelog_raw<<JCODE_CHANGELOG_EOF\n%s\nJCODE_CHANGELOG_EOF\n' "$changelog_raw"
+  printf 'changelog_raw<<DAANIO_CHANGELOG_EOF\n%s\nDAANIO_CHANGELOG_EOF\n' "$changelog_raw"
 } > "$metadata_file"
 
 echo "Building portable Linux release in Docker image: $image"
@@ -74,15 +74,15 @@ echo "Embedding git metadata: hash=${git_hash:-<none>} tag=${git_tag:-<none>} di
 
 docker run --rm \
   -e CARGO_TERM_COLOR=always \
-  -e JCODE_RELEASE_BUILD="${JCODE_RELEASE_BUILD:-1}" \
-  -e JCODE_BUILD_SEMVER="${JCODE_BUILD_SEMVER:-}" \
-  -e JCODE_BUILD_METADATA_FILE=/jcode-build-meta \
-  -e JCODE_COMPAT_PROFILE="$profile" \
-  -e JCODE_COMPAT_TARGET="$target" \
+  -e DAANIO_RELEASE_BUILD="${DAANIO_RELEASE_BUILD:-1}" \
+  -e DAANIO_BUILD_SEMVER="${DAANIO_BUILD_SEMVER:-}" \
+  -e DAANIO_BUILD_METADATA_FILE=/daanio-build-meta \
+  -e DAANIO_COMPAT_PROFILE="$profile" \
+  -e DAANIO_COMPAT_TARGET="$target" \
   -e HOST_UID="$host_uid" \
   -e HOST_GID="$host_gid" \
   -v "$repo_root:/work" \
-  -v "$metadata_file:/jcode-build-meta:ro" \
+  -v "$metadata_file:/daanio-build-meta:ro" \
   -v "$out_dir:/out" \
   -v "$cache_root/cargo-registry:/root/.cargo/registry" \
   -v "$cache_root/cargo-git:/root/.cargo/git" \
@@ -132,7 +132,7 @@ docker run --rm \
 	    source /root/.cargo/env
 
 	    # Belt-and-suspenders: the host-computed metadata file
-	    # (JCODE_BUILD_METADATA_FILE=/jcode-build-meta) is the primary source of
+	    # (DAANIO_BUILD_METADATA_FILE=/daanio-build-meta) is the primary source of
 	    # git hash/date/changelog, but mark the bind-mounted repo as a safe
 	    # directory so any in-container git fallback still works despite the
 	    # host-UID/root-git ownership mismatch (CVE-2022-24765 guard).
@@ -141,10 +141,10 @@ docker run --rm \
 	    export CARGO_TARGET_DIR=/work/target/linux-compat
 	    export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
 	    export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS:--C link-arg=-static-libgcc}"
-	    cargo build --profile "$JCODE_COMPAT_PROFILE" --target "$JCODE_COMPAT_TARGET" \
-	      -p jcode --bin jcode --features linux-compat-vendored-openssl
+	    cargo build --profile "$DAANIO_COMPAT_PROFILE" --target "$DAANIO_COMPAT_TARGET" \
+	      -p daanio --bin daanio --features linux-compat-vendored-openssl
 
-	    cp "$CARGO_TARGET_DIR/$JCODE_COMPAT_TARGET/$JCODE_COMPAT_PROFILE/jcode" "/out/'"$artifact"'.bin"
+	    cp "$CARGO_TARGET_DIR/$DAANIO_COMPAT_TARGET/$DAANIO_COMPAT_PROFILE/daanio" "/out/'"$artifact"'.bin"
 	    chmod +x "/out/'"$artifact"'.bin"
 	    cat > "/out/'"$artifact"'" <<WRAPPER
 #!/usr/bin/env sh
@@ -172,7 +172,7 @@ WRAPPER
 	    # Preserve the OpenSSL runtime libraries used by the build image. Some
 	    # Terminal-Bench containers are older than the build host and either lack
 	    # libssl entirely or expose a different SONAME. The Harbor adapter uploads
-	    # these sibling libraries and sets LD_LIBRARY_PATH for the jcode process.
+	    # these sibling libraries and sets LD_LIBRARY_PATH for the daanio process.
 	    ldd "/out/'"$artifact"'.bin" \
 	      | awk "/lib(ssl|crypto)[.]so/ { print \$3 }" \
 	      | while read -r lib; do

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Golden-image regression checks for Jcode Desktop gallery captures.
+"""Golden-image regression checks for Daanio Desktop gallery captures.
 
 Renders every gallery fixture state headlessly via
-`jcode-desktop --capture-gallery-screens` and compares the PNGs against
+`daanio-desktop --capture-gallery-screens` and compares the PNGs against
 checked-in baselines.
 
 Usage:
@@ -33,7 +33,7 @@ except ImportError:
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_BIN = ROOT / "target" / "debug" / "jcode-desktop"
+DEFAULT_BIN = ROOT / "target" / "debug" / "daanio-desktop"
 DEFAULT_BASELINE_DIR = ROOT / "tests" / "desktop-gallery-golden"
 
 
@@ -84,7 +84,7 @@ def main() -> int:
     if not args.binary.exists():
         print(
             f"error: desktop binary not found at {args.binary}; build with "
-            "`cargo build -p jcode-desktop --bin jcode-desktop`",
+            "`cargo build -p daanio-desktop --bin daanio-desktop`",
             file=sys.stderr,
         )
         return 2
@@ -93,7 +93,7 @@ def main() -> int:
     if args.size:
         baseline_dir = baseline_dir / args.size
 
-    with tempfile.TemporaryDirectory(prefix="jcode-gallery-golden-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="daanio-gallery-golden-") as tmp:
         out_dir = Path(tmp)
         screens = capture(args.binary, out_dir, args.size)
 

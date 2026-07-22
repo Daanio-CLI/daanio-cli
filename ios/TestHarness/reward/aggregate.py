@@ -35,7 +35,7 @@ sys.path.insert(0, str(HERE.parent))  # so `import reward...` works
 from reward.context import Context  # noqa: E402
 from reward.types import CategoryScore  # noqa: E402
 
-DEFAULT_SOURCE_ROOT = str(IOS / "Sources" / "JCodeMobile")
+DEFAULT_SOURCE_ROOT = str(IOS / "Sources" / "DaanioMobile")
 
 
 def discover_scorers():

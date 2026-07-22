@@ -1,0 +1,152 @@
+[package]
+name = "daanio-base"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Foundational layer of the daanio application core: the downward-closed set of
+# modules (provider, auth, config, session, message, memory, telemetry, ...)
+# that the server/tool/agent layer depends on. Split out of `daanio-app-core` so
+# the two halves compile as separate rustc units, halving peak compile memory.
+# `daanio-app-core` re-exports this crate (`pub use daanio_base::*`) so that every
+# existing `crate::<module>` path keeps resolving unchanged.
+
+[lib]
+name = "daanio_base"
+path = "src/lib.rs"
+
+[dependencies]
+# Memory allocator (reduces fragmentation for long-running server)
+tikv-jemalloc-ctl = { version = "0.6", optional = true }
+tikv-jemalloc-sys = { version = "0.6", optional = true }
+
+# Async runtime
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking", "charset", "http2", "system-proxy", "rustls-tls", "rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+serde_yaml = "0.9"
+toml = "0.8"
+
+# File operations
+
+# Utilities
+dirs = "5"               # home directory
+anyhow = "1"
+libc = "0.2"             # Unix system calls (flock)
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+urlencoding = "2"        # URL encoding for web search
+uuid = { version = "1", features = ["v4", "v5"] }
+proctitle = "0.1"
+
+# Embeddings (local inference) - behind feature flag (163 crates, slow to compile)
+daanio-embedding = { path = "../daanio-embedding", optional = true }
+daanio-gateway-types = { path = "../daanio-gateway-types" }
+daanio-import-core = { path = "../daanio-import-core" }
+daanio-logging = { path = "../daanio-logging" }
+
+# OAuth
+base64 = "0.22"
+sha2 = "0.10"
+rand = "0.9.3"
+hex = "0.4"
+url = "2"
+open = "5"               # Open URLs in browser
+daanio-auth-types = { path = "../daanio-auth-types" }
+daanio-azure-auth = { path = "../daanio-azure-auth" }
+daanio-agent-runtime = { path = "../daanio-agent-runtime" }
+daanio-provider-metadata = { path = "../daanio-provider-metadata" }
+daanio-provider-env = { path = "../daanio-provider-env" }
+daanio-provider-core = { path = "../daanio-provider-core" }
+# default-features=false so this crate's `bedrock` feature (below) controls the
+# AWS SDK stack; the pure model-metadata/credential-detection layer is always on.
+daanio-provider-bedrock = { path = "../daanio-provider-bedrock", default-features = false }
+daanio-provider-antigravity = { path = "../daanio-provider-antigravity" }
+daanio-provider-copilot = { path = "../daanio-provider-copilot" }
+daanio-provider-openai = { path = "../daanio-provider-openai" }
+daanio-provider-openrouter = { path = "../daanio-provider-openrouter" }
+daanio-provider-gemini = { path = "../daanio-provider-gemini" }
+# NOTE: this foundation layer intentionally does NOT depend on any `daanio-tui-*`
+# crate. The two pure-data/string symbols it used to reach for (`ResumeTarget`,
+# `reasoning_line_markup`) were moved to `daanio-session-types` and
+# `daanio-render-core` respectively, so the layering inversion (foundation
+# depending on presentation) is gone.
+daanio-render-core = { path = "../daanio-render-core" }
+daanio-terminal-launch = { path = "../daanio-terminal-launch" }
+daanio-terminal-image = { path = "../daanio-terminal-image" }
+daanio-telemetry-core = { path = "../daanio-telemetry-core" }
+daanio-usage-types = { path = "../daanio-usage-types" }
+
+# Streaming
+
+# Terminal I/O (event stream for interactive auth/secret prompts). NOTE: the
+# heavier presentation deps (ratatui widgets, arboard clipboard) were dropped
+# from this foundation layer; they are unused here and live only in `daanio-tui`.
+crossterm = { version = "0.29", features = ["event-stream"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }  # Only PNG/JPEG (skip avif/rav1e, exr, gif, tiff, etc)
+
+# NOTE: PDF text extraction (daanio-pdf) lives in the upper daanio-app-core crate
+# (tool/read.rs), not here.
+daanio-background-types = { path = "../daanio-background-types" }
+daanio-batch-types = { path = "../daanio-batch-types" }
+daanio-build-meta = { path = "../daanio-build-meta" }
+daanio-compaction-core = { path = "../daanio-compaction-core" }
+daanio-config-types = { path = "../daanio-config-types" }
+daanio-core = { path = "../daanio-core" }
+daanio-memory-types = { path = "../daanio-memory-types" }
+daanio-message-types = { path = "../daanio-message-types" }
+daanio-plan = { path = "../daanio-plan" }
+daanio-protocol = { path = "../daanio-protocol" }
+daanio-session-types = { path = "../daanio-session-types" }
+daanio-storage = { path = "../daanio-storage" }
+daanio-task-types = { path = "../daanio-task-types" }
+daanio-tool-core = { path = "../daanio-tool-core" }
+daanio-tool-types = { path = "../daanio-tool-types" }
+daanio-side-panel-types = { path = "../daanio-side-panel-types" }
+
+# Gzip decoding (used by provider import/helpers)
+tempfile = "3"
+qrcode = { version = "0.14.1", default-features = false }
+
+[features]
+default = ["embeddings", "bedrock"]
+# Compiles the in-crate test helpers (storage::lock_test_env,
+# auth::test_sandbox, bus::reset_models_updated_publish_state_for_tests, ...) as
+# `pub` so downstream crates' test targets can reach them. Enabled as a
+# dev-dependency feature by daanio-app-core / daanio / etc.; never in normal
+# (non-test) builds.
+test-support = []
+jemalloc = [
+    "dep:tikv-jemalloc-ctl",
+    "dep:tikv-jemalloc-sys",
+    "tikv-jemalloc-ctl/stats",
+]
+jemalloc-prof = [
+    "jemalloc",
+    "tikv-jemalloc-ctl/profiling",
+]
+embeddings = ["dep:daanio-embedding"]
+# Live AWS Bedrock support (the ~20-crate AWS SDK stack) lives in
+# daanio-provider-bedrock (aws-sdk); forward there. Without it the Bedrock
+# provider still compiles but live calls return an explanatory error.
+bedrock = ["daanio-provider-bedrock/aws-sdk"]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Power", "Win32_System_Threading"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+global-hotkey = "0.7"
+
+[dev-dependencies]
+# Dev-only cycle (cargo permits dev-dependencies on dependents): base's
+# MultiProvider routing tests exercise the real OpenRouter/OpenAI-compatible
+# runtime through the composition-root registry, exactly like the binary.
+daanio-provider-openrouter-runtime = { path = "../daanio-provider-openrouter-runtime" }

@@ -1,14 +1,14 @@
 #!/bin/bash
 # Tool call benchmarking script
 # Measures execution time for each tool with representative inputs
-# Run from the jcode repo root
+# Run from the daanio repo root
 
 set -euo pipefail
 
 ITERATIONS=${1:-5}
-RESULTS_FILE="/tmp/jcode_tool_benchmark_$(date +%Y%m%d_%H%M%S).csv"
+RESULTS_FILE="/tmp/daanio_tool_benchmark_$(date +%Y%m%d_%H%M%S).csv"
 
-echo "=== jcode Tool Call Benchmark ==="
+echo "=== daanio Tool Call Benchmark ==="
 echo "Iterations per tool: $ITERATIONS"
 echo "Results file: $RESULTS_FILE"
 echo ""
@@ -61,11 +61,11 @@ benchmark_tool() {
 }
 
 # Find debug socket
-DEBUG_SOCK="${JCODE_DEBUG_SOCK:-/run/user/$(id -u)/jcode-debug.sock}"
+DEBUG_SOCK="${DAANIO_DEBUG_SOCK:-/run/user/$(id -u)/daanio-debug.sock}"
 
 if [ ! -S "$DEBUG_SOCK" ]; then
     echo "ERROR: Debug socket not found at $DEBUG_SOCK"
-    echo "Make sure jcode is running with debug control enabled."
+    echo "Make sure daanio is running with debug control enabled."
     exit 1
 fi
 

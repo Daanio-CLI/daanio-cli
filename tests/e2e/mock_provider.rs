@@ -4,8 +4,8 @@
 
 use anyhow::Result;
 use async_stream::stream;
-use jcode::message::{Message, StreamEvent, ToolDefinition};
-use jcode::provider::{EventStream, Provider};
+use daanio::message::{Message, StreamEvent, ToolDefinition};
+use daanio::provider::{EventStream, Provider};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 

@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -9,13 +9,18 @@ use crate::{build, logging, session, startup_profile};
 use super::output;
 use super::provider_init::ProviderChoice;
 
-pub use jcode_selfdev_types::CLIENT_SELFDEV_ENV;
-pub use jcode_selfdev_types::client_selfdev_requested;
+pub use daanio_selfdev_types::CLIENT_SELFDEV_ENV;
+pub use daanio_selfdev_types::client_selfdev_requested;
 
-const JCODE_REPO_URL: &str = "https://github.com/1jehuang/jcode.git";
+const DAANIO_REPO_URL_ENV: &str = "DAANIO_REPO_URL";
+
+fn configured_repo_url() -> Result<String> {
+    std::env::var(DAANIO_REPO_URL_ENV)
+        .context("Self-development cloning is not configured; set DAANIO_REPO_URL first")
+}
 
 fn selfdev_clone_dir() -> Result<PathBuf> {
-    Ok(crate::storage::jcode_dir()?.join("source").join("jcode"))
+    Ok(crate::storage::daanio_dir()?.join("source").join("daanio"))
 }
 
 fn resolve_or_clone_repo_dir() -> Result<PathBuf> {
@@ -23,17 +28,18 @@ fn resolve_or_clone_repo_dir() -> Result<PathBuf> {
         return Ok(repo_dir);
     }
 
+    let repo_url = configured_repo_url()?;
     let repo_dir = selfdev_clone_dir()?;
     if repo_dir.exists() {
-        if build::is_jcode_repo(&repo_dir) {
+        if build::is_daanio_repo(&repo_dir) {
             return Ok(repo_dir);
         }
 
         anyhow::bail!(
-            "Self-dev source directory exists but is not a jcode repository: {}\n\
+            "Self-dev source directory exists but is not a daanio repository: {}\n\
              Move it aside or clone {} there, then retry.",
             repo_dir.display(),
-            JCODE_REPO_URL
+            repo_url
         );
     }
 
@@ -43,13 +49,13 @@ fn resolve_or_clone_repo_dir() -> Result<PathBuf> {
     std::fs::create_dir_all(parent)?;
 
     output::stderr_info(format!(
-        "No local jcode checkout found; cloning self-dev source into {}...",
+        "No local daanio checkout found; cloning self-dev source into {}...",
         repo_dir.display()
     ));
 
     let status = Command::new("git")
         .arg("clone")
-        .arg(JCODE_REPO_URL)
+        .arg(&repo_url)
         .arg(&repo_dir)
         .status()
         .map_err(|e| anyhow::anyhow!("Failed to run git clone for self-dev source: {e}"))?;
@@ -58,17 +64,17 @@ fn resolve_or_clone_repo_dir() -> Result<PathBuf> {
         anyhow::bail!(
             "Failed to clone self-dev source from {} into {} (git exited with {}).\n\
              Clone it manually with: git clone {} {}",
-            JCODE_REPO_URL,
+            repo_url,
             repo_dir.display(),
             status,
-            JCODE_REPO_URL,
+            repo_url,
             repo_dir.display()
         );
     }
 
-    if !build::is_jcode_repo(&repo_dir) {
+    if !build::is_daanio_repo(&repo_dir) {
         anyhow::bail!(
-            "Cloned self-dev source is not a valid jcode repository: {}",
+            "Cloned self-dev source is not a valid daanio repository: {}",
             repo_dir.display()
         );
     }
@@ -103,7 +109,7 @@ pub async fn run_self_dev(should_build: bool, resume_session: Option<String>) ->
     crate::env::set_var(CLIENT_SELFDEV_ENV, "1");
 
     let repo_dir = resolve_or_clone_repo_dir()?;
-    crate::env::set_var("JCODE_REPO_DIR", &repo_dir);
+    crate::env::set_var("DAANIO_REPO_DIR", &repo_dir);
 
     startup_profile::mark("selfdev_session_create");
     let is_resume = resume_session.is_some();
@@ -145,7 +151,7 @@ pub async fn run_self_dev(should_build: bool, resume_session: Option<String>) ->
     if !target_binary.exists() {
         anyhow::bail!(
             "No binary found at {:?}\n\
-             Run 'jcode self-dev --build' first, or build with '{}' and then publish current.",
+             Run 'daanio self-dev --build' first, or build with '{}' and then publish current.",
             target_binary,
             build::selfdev_build_command(&repo_dir).display,
         );
@@ -161,11 +167,11 @@ pub async fn run_self_dev(should_build: bool, resume_session: Option<String>) ->
     }
 
     if is_resume {
-        crate::env::set_var("JCODE_RESUMING", "1");
+        crate::env::set_var("DAANIO_RESUMING", "1");
     }
 
     let mut server_running = super::dispatch::server_is_running().await;
-    if !server_running && std::env::var("JCODE_RESUMING").is_ok() {
+    if !server_running && std::env::var("DAANIO_RESUMING").is_ok() {
         if let Some(state) = crate::server::recent_reload_state(std::time::Duration::from_secs(30))
         {
             match state.phase {
@@ -220,7 +226,7 @@ pub async fn run_self_dev(should_build: bool, resume_session: Option<String>) ->
         super::dispatch::spawn_server(&ProviderChoice::Auto, None, None).await?;
     }
 
-    if std::env::var("JCODE_RESUMING").is_err() && server_running {
+    if std::env::var("DAANIO_RESUMING").is_err() && server_running {
         output::stderr_info("Connecting to shared server...");
     }
 

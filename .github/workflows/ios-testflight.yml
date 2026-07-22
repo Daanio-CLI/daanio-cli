@@ -13,13 +13,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUNDLE_ID: com.jcode.mobile
-  SCHEME: JCodeMobile
+  BUNDLE_ID: com.daanio.mobile
+  SCHEME: DaanioMobile
   TEAM_ID: TAS6ARKDN7
 
 jobs:
   test:
-    name: swift test (JCodeKit)
+    name: swift test (DaanioKit)
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -31,7 +31,7 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Run JCodeKit tests on macOS
+      - name: Run DaanioKit tests on macOS
         working-directory: ios
         run: swift test
 
@@ -54,7 +54,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild build \
-            -project JCodeMobile.xcodeproj \
+            -project DaanioMobile.xcodeproj \
             -scheme "$SCHEME" \
             -configuration Debug \
             -destination "generic/platform=iOS Simulator" \
@@ -89,11 +89,11 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild archive \
-            -project JCodeMobile.xcodeproj \
+            -project DaanioMobile.xcodeproj \
             -scheme "$SCHEME" \
             -configuration Release \
             -destination "generic/platform=iOS" \
-            -archivePath build/JCodeMobile.xcarchive \
+            -archivePath build/DaanioMobile.xcarchive \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$HOME/private_keys/AuthKey_${{ secrets.APPSTORE_API_KEY_ID }}.p8" \
             -authenticationKeyID "${{ secrets.APPSTORE_API_KEY_ID }}" \
@@ -130,7 +130,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -exportArchive \
-            -archivePath build/JCodeMobile.xcarchive \
+            -archivePath build/DaanioMobile.xcarchive \
             -exportOptionsPlist ExportOptions.plist \
             -exportPath build/export \
             -allowProvisioningUpdates \

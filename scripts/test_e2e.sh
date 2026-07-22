@@ -1,5 +1,5 @@
 #!/bin/bash
-# End-to-end test script for jcode
+# End-to-end test script for daanio
 
 set -e
 
@@ -10,16 +10,16 @@ run_cargo() {
     (cd "$repo_root" && "$cargo_exec" "$@")
 }
 
-echo "=== E2E Testing Script for jcode ==="
+echo "=== E2E Testing Script for daanio ==="
 echo ""
 
 # Test 1: Check binary exists and runs
-echo "Test 1: Check jcode binary..."
-if command -v jcode &> /dev/null; then
-    echo "✓ jcode binary found"
-    jcode --version
+echo "Test 1: Check daanio binary..."
+if command -v daanio &> /dev/null; then
+    echo "✓ daanio binary found"
+    daanio --version
 else
-    echo "✗ jcode binary not found"
+    echo "✗ daanio binary not found"
     exit 1
 fi
 
@@ -53,16 +53,16 @@ echo "Test 6: E2E integration tests..."
 run_cargo test --test e2e --quiet
 echo "✓ E2E tests passed"
 
-if [[ "${JCODE_REAL_PROVIDER:-0}" == "1" ]]; then
+if [[ "${DAANIO_REAL_PROVIDER:-0}" == "1" ]]; then
     echo ""
-    echo "Test 7: Real provider smoke (JCODE_REAL_PROVIDER=1)..."
+    echo "Test 7: Real provider smoke (DAANIO_REAL_PROVIDER=1)..."
     scripts/real_provider_smoke.sh
     echo "✓ Real provider smoke passed"
 fi
 
-if [[ "${JCODE_REAL_AUTH_TEST:-0}" == "1" ]]; then
+if [[ "${DAANIO_REAL_AUTH_TEST:-0}" == "1" ]]; then
     echo ""
-    echo "Test 8: Auth E2E validation (JCODE_REAL_AUTH_TEST=1)..."
+    echo "Test 8: Auth E2E validation (DAANIO_REAL_AUTH_TEST=1)..."
     scripts/test_auth_e2e.sh
     echo "✓ Auth E2E validation passed"
 fi
@@ -71,6 +71,6 @@ echo ""
 echo "=== All tests passed! ==="
 echo ""
 echo "To test interactively:"
-echo "  jcode        # Start TUI mode"
-echo "  jcode server # Start server mode"
-echo "  jcode client # Connect to server"
+echo "  daanio        # Start TUI mode"
+echo "  daanio server # Start server mode"
+echo "  daanio client # Connect to server"

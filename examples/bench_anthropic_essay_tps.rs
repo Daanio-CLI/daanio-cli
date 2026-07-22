@@ -1,8 +1,8 @@
 use anyhow::Result;
+use daanio::message::{ContentBlock, Message, Role, StreamEvent};
+use daanio::provider::Provider;
+use daanio_provider_anthropic_runtime::AnthropicProvider;
 use futures::StreamExt;
-use jcode::message::{ContentBlock, Message, Role, StreamEvent};
-use jcode::provider::Provider;
-use jcode_provider_anthropic_runtime::AnthropicProvider;
 use std::time::Instant;
 
 async fn run_one_with_retry(
@@ -35,7 +35,7 @@ async fn run_one_with_retry(
 
 async fn run_one(provider: &AnthropicProvider, label: &str, words: usize) -> Result<()> {
     let prompt = format!(
-        "Write a very long essay of at least {words} words about the architecture, maintainability, reliability, performance, testing strategy, provider abstraction, TUI complexity, security model, and long-term engineering risks of a Rust terminal AI coding agent codebase like jcode. Be specific and detailed. Do not use tools. Do not stop early."
+        "Write a very long essay of at least {words} words about the architecture, maintainability, reliability, performance, testing strategy, provider abstraction, TUI complexity, security model, and long-term engineering risks of a Rust terminal AI coding agent codebase like daanio. Be specific and detailed. Do not use tools. Do not stop early."
     );
     let messages = vec![Message {
         role: Role::User,

@@ -1,97 +1,98 @@
 [package]
-name = "jcode"
-version = "0.54.4"
-description = "Possibly the greatest coding agent ever built — blazing-fast TUI, multi-model, swarm coordination, 30+ tools"
+name = "daanio"
+version = "0.1.0"
+description = "Daanio CLI — a fast, multi-provider coding agent for the terminal"
 edition = "2024"
 autobins = false
+license = "MIT"
 
 [workspace]
 members = [
     ".",
-    "crates/jcode-agent-runtime",
-    "crates/jcode-app-core",
-    "crates/jcode-base",
-    "crates/jcode-tui",
-    "crates/jcode-build-meta",
-    "crates/jcode-ambient-types",
-    "crates/jcode-auth-types",
-    "crates/jcode-embedding",
-    "crates/jcode-gateway-types",
-    "crates/jcode-import-core",
-    "crates/jcode-pdf",
-    "crates/jcode-logging",
-    "crates/jcode-background-types",
-    "crates/jcode-batch-types",
-    "crates/jcode-build-support",
-    "crates/jcode-compaction-core",
-    "crates/jcode-config-types",
-    "crates/jcode-core",
-    "crates/jcode-fuzzy",
-    "crates/jcode-memory-types",
-    "crates/jcode-message-types",
-    "crates/jcode-overnight-core",
-    "crates/jcode-plan",
-    "crates/jcode-productivity-core",
-    "crates/jcode-swarm-core",
-    "crates/jcode-protocol",
-    "crates/jcode-selfdev-types",
-    "crates/jcode-session-types",
-    "crates/jcode-setup-hints",
-    "crates/jcode-storage",
-    "crates/jcode-side-panel-types",
-    "crates/jcode-azure-auth",
-    "crates/jcode-notify-email",
-    "crates/jcode-provider-metadata",
-    "crates/jcode-provider-env",
-    "crates/jcode-provider-core",
-    "crates/jcode-provider-bedrock",
-    "crates/jcode-provider-anthropic",
-    "crates/jcode-provider-antigravity",
-    "crates/jcode-provider-copilot",
-    "crates/jcode-provider-openrouter",
-    "crates/jcode-provider-openai",
-    "crates/jcode-provider-gemini",
-    "crates/jcode-provider-gemini-runtime",
-    "crates/jcode-provider-cursor-runtime",
-    "crates/jcode-provider-antigravity-runtime",
-    "crates/jcode-provider-copilot-runtime",
-    "crates/jcode-provider-claude-cli-runtime",
-    "crates/jcode-provider-openrouter-runtime",
-    "crates/jcode-provider-anthropic-runtime",
-    "crates/jcode-provider-openai-runtime",
-    "crates/jcode-provider-doctor",
-    "crates/jcode-tui-markdown",
-    "crates/jcode-tui-messages",
-    "crates/jcode-usage-types",
-    "crates/jcode-tui-core",
-    "crates/jcode-tui-mermaid",
-    "crates/jcode-task-types",
-    "crates/jcode-tool-core",
-    "crates/jcode-tool-types",
-    "crates/jcode-tui-account-picker",
-    "crates/jcode-tui-anim",
-    "crates/jcode-tui-render",
-    "crates/jcode-tui-visual-debug",
-    "crates/jcode-tui-session-picker",
-    "crates/jcode-tui-style",
-    "crates/jcode-tui-permissions",
-    "crates/jcode-tui-tool-display",
-    "crates/jcode-tui-usage-overlay",
-    "crates/jcode-update-core",
-    "crates/jcode-terminal-launch",
-    "crates/jcode-terminal-image",
-    "crates/jcode-telemetry-core",
-    "crates/jcode-tui-workspace",
-    "crates/jcode-desktop",
-    "crates/jcode-render-core",
+    "crates/daanio-agent-runtime",
+    "crates/daanio-app-core",
+    "crates/daanio-base",
+    "crates/daanio-tui",
+    "crates/daanio-build-meta",
+    "crates/daanio-ambient-types",
+    "crates/daanio-auth-types",
+    "crates/daanio-embedding",
+    "crates/daanio-gateway-types",
+    "crates/daanio-import-core",
+    "crates/daanio-pdf",
+    "crates/daanio-logging",
+    "crates/daanio-background-types",
+    "crates/daanio-batch-types",
+    "crates/daanio-build-support",
+    "crates/daanio-compaction-core",
+    "crates/daanio-config-types",
+    "crates/daanio-core",
+    "crates/daanio-fuzzy",
+    "crates/daanio-memory-types",
+    "crates/daanio-message-types",
+    "crates/daanio-overnight-core",
+    "crates/daanio-plan",
+    "crates/daanio-productivity-core",
+    "crates/daanio-swarm-core",
+    "crates/daanio-protocol",
+    "crates/daanio-selfdev-types",
+    "crates/daanio-session-types",
+    "crates/daanio-setup-hints",
+    "crates/daanio-storage",
+    "crates/daanio-side-panel-types",
+    "crates/daanio-azure-auth",
+    "crates/daanio-notify-email",
+    "crates/daanio-provider-metadata",
+    "crates/daanio-provider-env",
+    "crates/daanio-provider-core",
+    "crates/daanio-provider-bedrock",
+    "crates/daanio-provider-anthropic",
+    "crates/daanio-provider-antigravity",
+    "crates/daanio-provider-copilot",
+    "crates/daanio-provider-openrouter",
+    "crates/daanio-provider-openai",
+    "crates/daanio-provider-gemini",
+    "crates/daanio-provider-gemini-runtime",
+    "crates/daanio-provider-cursor-runtime",
+    "crates/daanio-provider-antigravity-runtime",
+    "crates/daanio-provider-copilot-runtime",
+    "crates/daanio-provider-claude-cli-runtime",
+    "crates/daanio-provider-openrouter-runtime",
+    "crates/daanio-provider-anthropic-runtime",
+    "crates/daanio-provider-openai-runtime",
+    "crates/daanio-provider-doctor",
+    "crates/daanio-tui-markdown",
+    "crates/daanio-tui-messages",
+    "crates/daanio-usage-types",
+    "crates/daanio-tui-core",
+    "crates/daanio-tui-mermaid",
+    "crates/daanio-task-types",
+    "crates/daanio-tool-core",
+    "crates/daanio-tool-types",
+    "crates/daanio-tui-account-picker",
+    "crates/daanio-tui-anim",
+    "crates/daanio-tui-render",
+    "crates/daanio-tui-visual-debug",
+    "crates/daanio-tui-session-picker",
+    "crates/daanio-tui-style",
+    "crates/daanio-tui-permissions",
+    "crates/daanio-tui-tool-display",
+    "crates/daanio-tui-usage-overlay",
+    "crates/daanio-update-core",
+    "crates/daanio-terminal-launch",
+    "crates/daanio-terminal-image",
+    "crates/daanio-telemetry-core",
+    "crates/daanio-tui-workspace",
+    "crates/daanio-desktop",
+    "crates/daanio-render-core",
 ]
 
 [lib]
-name = "jcode"
+name = "daanio"
 path = "src/lib.rs"
 
 [[bin]]
-name = "jcode"
+name = "daanio"
 path = "src/main.rs"
 
 [[bin]]
@@ -99,7 +100,7 @@ name = "test_api"
 path = "src/bin/test_api.rs"
 
 [[bin]]
-name = "jcode-harness"
+name = "daanio-harness"
 path = "src/bin/harness.rs"
 
 [[bin]]
@@ -158,7 +159,7 @@ chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 hex = "0.4"
 open = "5"               # Open URLs in browser
-jcode-tui-session-picker = { path = "crates/jcode-tui-session-picker", features = ["serde"] }
+daanio-tui-session-picker = { path = "crates/daanio-tui-session-picker", features = ["serde"] }
 
 # Streaming
 tokio-stream = "0.1"
@@ -170,30 +171,30 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 # Markdown & syntax highlighting
 
 # PDF parsing (behind feature flag)
-jcode-build-meta = { path = "crates/jcode-build-meta" }
+daanio-build-meta = { path = "crates/daanio-build-meta" }
 # Tiny leaf helpers (console/env/fs/id) used directly by the cli layer.
 # Presentation layer: the terminal UI (`tui`) + offline replay (`video_export`),
 # compiled as a separate rustc unit. It re-exports the application core
-# (`jcode-app-core`, which re-exports `jcode-base`), so the root crate (cli +
-# bin) re-exports everything via `pub use jcode_tui::*`. default-features=false
+# (`daanio-app-core`, which re-exports `daanio-base`), so the root crate (cli +
+# bin) re-exports everything via `pub use daanio_tui::*`. default-features=false
 # so the root feature set fully controls the downstream features (see
 # [features]).
-jcode-tui = { path = "crates/jcode-tui", default-features = false }
-# `jcode provider-doctor` / provider diagnostics; sits downstream of jcode-base
+daanio-tui = { path = "crates/daanio-tui", default-features = false }
+# `daanio provider-doctor` / provider diagnostics; sits downstream of daanio-base
 # so doctor edits do not rebuild the base -> app-core -> tui spine.
-jcode-provider-doctor = { path = "crates/jcode-provider-doctor" }
-# Gemini provider runtime; sits downstream of jcode-base so gemini edits do
+daanio-provider-doctor = { path = "crates/daanio-provider-doctor" }
+# Gemini provider runtime; sits downstream of daanio-base so gemini edits do
 # not rebuild the base -> app-core -> tui spine. Registered with the external
 # provider registry at startup (src/cli/startup.rs).
-jcode-provider-gemini-runtime = { path = "crates/jcode-provider-gemini-runtime" }
-jcode-provider-cursor-runtime = { path = "crates/jcode-provider-cursor-runtime" }
-jcode-provider-antigravity-runtime = { path = "crates/jcode-provider-antigravity-runtime" }
-jcode-provider-copilot-runtime = { path = "crates/jcode-provider-copilot-runtime" }
-jcode-provider-claude-cli-runtime = { path = "crates/jcode-provider-claude-cli-runtime" }
-jcode-provider-openrouter-runtime = { path = "crates/jcode-provider-openrouter-runtime" }
-jcode-provider-anthropic-runtime = { path = "crates/jcode-provider-anthropic-runtime" }
-jcode-provider-openai-runtime = { path = "crates/jcode-provider-openai-runtime" }
-jcode-selfdev-types = { path = "crates/jcode-selfdev-types" }
+daanio-provider-gemini-runtime = { path = "crates/daanio-provider-gemini-runtime" }
+daanio-provider-cursor-runtime = { path = "crates/daanio-provider-cursor-runtime" }
+daanio-provider-antigravity-runtime = { path = "crates/daanio-provider-antigravity-runtime" }
+daanio-provider-copilot-runtime = { path = "crates/daanio-provider-copilot-runtime" }
+daanio-provider-claude-cli-runtime = { path = "crates/daanio-provider-claude-cli-runtime" }
+daanio-provider-openrouter-runtime = { path = "crates/daanio-provider-openrouter-runtime" }
+daanio-provider-anthropic-runtime = { path = "crates/daanio-provider-anthropic-runtime" }
+daanio-provider-openai-runtime = { path = "crates/daanio-provider-openai-runtime" }
+daanio-selfdev-types = { path = "crates/daanio-selfdev-types" }
 
 # Archive extraction (for auto-update)
 tempfile = "3"
@@ -201,31 +202,31 @@ tempfile = "3"
 [features]
 # Include local ONNX/tokenizer embeddings in default builds so memory recall,
 # semantic retrieval, and embedding-backed features work out of the box.
-# Use `JCODE_DEV_FEATURE_PROFILE=minimal` for compile-speed probes that need
+# Use `DAANIO_DEV_FEATURE_PROFILE=minimal` for compile-speed probes that need
 # to skip optional default feature stacks.
 default = ["pdf", "embeddings", "bedrock"]
-dev-bins = ["jcode-tui/dev-bins"]
+dev-bins = ["daanio-tui/dev-bins"]
 jemalloc = [
     "dep:tikv-jemallocator",
     "tikv-jemallocator/stats",
-    "jcode-tui/jemalloc",
+    "daanio-tui/jemalloc",
 ]
 jemalloc-prof = [
     "jemalloc",
     "tikv-jemallocator/profiling",
-    "jcode-tui/jemalloc-prof",
+    "daanio-tui/jemalloc-prof",
 ]
-# Local embeddings and PDF extraction live in jcode-base / jcode-app-core;
+# Local embeddings and PDF extraction live in daanio-base / daanio-app-core;
 # these features just forward down the stack.
-embeddings = ["jcode-tui/embeddings"]
-# Live AWS Bedrock support (the AWS SDK stack) lives in jcode-provider-bedrock;
-# forwards down through jcode-tui -> jcode-app-core -> jcode-base.
-bedrock = ["jcode-tui/bedrock"]
+embeddings = ["daanio-tui/embeddings"]
+# Live AWS Bedrock support (the AWS SDK stack) lives in daanio-provider-bedrock;
+# forwards down through daanio-tui -> daanio-app-core -> daanio-base.
+bedrock = ["daanio-tui/bedrock"]
 # Internal release feature: build a supported OpenSSL inside the CentOS 7
 # compatibility image while preserving the glibc 2.17 runtime baseline.
-linux-compat-vendored-openssl = ["jcode-tui/linux-compat-vendored-openssl"]
-mmdr-size-api = ["jcode-tui/mmdr-size-api"]
-pdf = ["jcode-tui/pdf"]
+linux-compat-vendored-openssl = ["daanio-tui/linux-compat-vendored-openssl"]
+mmdr-size-api = ["daanio-tui/mmdr-size-api"]
+pdf = ["daanio-tui/pdf"]
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
@@ -297,13 +298,13 @@ opt-level = 0
 # dev/selfdev rebuilds, since it only recompiles when the animation code itself
 # changes. The "*" glob above sets the default for dependencies; these explicit
 # package entries take precedence for this one crate in each profile.
-[profile.dev.package."jcode-tui-anim"]
+[profile.dev.package."daanio-tui-anim"]
 opt-level = 3
 
-[profile.selfdev.package."jcode-tui-anim"]
+[profile.selfdev.package."daanio-tui-anim"]
 opt-level = 3
 
-[profile.test.package."jcode-tui-anim"]
+[profile.test.package."daanio-tui-anim"]
 opt-level = 3
 
 # The fuzzy matcher runs a char-level DP over every picker entry on every
@@ -311,16 +312,16 @@ opt-level = 3
 # kernels above, it is small, pure, dependency-free code that rarely changes,
 # so keeping it fully optimized in dev/selfdev builds costs one compile and
 # removes visible input lag in unoptimized builds.
-[profile.dev.package."jcode-fuzzy"]
+[profile.dev.package."daanio-fuzzy"]
 opt-level = 3
 
-[profile.selfdev.package."jcode-fuzzy"]
+[profile.selfdev.package."daanio-fuzzy"]
 opt-level = 3
 
-[profile.test.package."jcode-fuzzy"]
+[profile.test.package."daanio-fuzzy"]
 opt-level = 3
 
-[profile.release.package."jcode-fuzzy"]
+[profile.release.package."daanio-fuzzy"]
 opt-level = 3
 
 # Keep the text-shaping stack optimized even in dev/selfdev/test builds.
@@ -330,9 +331,9 @@ opt-level = 3
 # scrolling real (emoji/markdown-heavy) transcripts janky in dev/selfdev builds
 # even though the production release build was smooth. These are stable
 # third-party crates that almost never recompile, so pinning them to opt-level =
-# 3 costs a one-time compile and is then reused across every iterative jcode
-# rebuild (same rationale as jcode-tui-anim above). It does NOT slow down
-# recompiles of jcode's own crates.
+# 3 costs a one-time compile and is then reused across every iterative daanio
+# rebuild (same rationale as daanio-tui-anim above). It does NOT slow down
+# recompiles of daanio's own crates.
 [profile.dev.package.cosmic-text]
 opt-level = 3
 [profile.selfdev.package.cosmic-text]
@@ -380,7 +381,7 @@ opt-level = 3
 # Inline transcript images decode (png/zune-jpeg/fdeflate/miniz_oxide), resize
 # (image), and base64-encode (kitty transmit) at draw time; at opt-level 0 a
 # single screenshot costs 100-200ms per decode/resize, which reads as input
-# lag. These are pure pixel crates with no jcode logic, so optimizing them
+# lag. These are pure pixel crates with no daanio logic, so optimizing them
 # does not hurt rebuild times for our own code.
 [profile.dev.package.image]
 opt-level = 3
@@ -507,6 +508,6 @@ async-stream = "0.3"
 # ExternalAuthReviewCandidate read accessors) for the root crate's own cli test
 # target. Feature unification applies this only to test/bench/example builds,
 # never to a normal `cargo build`/release binary.
-jcode-tui = { path = "crates/jcode-tui", default-features = false, features = ["test-support"] }
+daanio-tui = { path = "crates/daanio-tui", default-features = false, features = ["test-support"] }
 
 [build-dependencies]

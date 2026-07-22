@@ -473,9 +473,9 @@ fn cloud_sessions_args_match_jade_helper_contract() {
 #[test]
 fn cloud_sessions_config_persists_secret_and_feeds_helper_env_without_args() {
     let _guard = crate::storage::lock_test_env();
-    let _saved = SavedEnv::capture(&["JCODE_HOME", "JADE_TOKEN_FOR_TEST"]);
+    let _saved = SavedEnv::capture(&["DAANIO_HOME", "JADE_TOKEN_FOR_TEST"]);
     let temp = tempfile::tempdir().expect("tempdir");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    crate::env::set_var("DAANIO_HOME", temp.path());
     crate::env::set_var("JADE_TOKEN_FOR_TEST", "secret-token-value");
 
     run_cloud_sessions_configure(
@@ -563,9 +563,9 @@ fn collect_sync_candidates_picks_only_session_json() {
 #[test]
 fn cloud_sessions_sync_dry_run_reports_without_uploading_or_writing_state() {
     let _guard = crate::storage::lock_test_env();
-    let _saved = SavedEnv::capture(&["JCODE_HOME", "JCODE_JADE_SESSIONS_HELPER"]);
+    let _saved = SavedEnv::capture(&["DAANIO_HOME", "DAANIO_JADE_SESSIONS_HELPER"]);
     let temp = tempfile::tempdir().expect("tempdir");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    crate::env::set_var("DAANIO_HOME", temp.path());
 
     // A dummy helper that should never run during a dry run.
     let helper = temp.path().join("never_runs.sh");
@@ -575,7 +575,7 @@ fn cloud_sessions_sync_dry_run_reports_without_uploading_or_writing_state() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    crate::env::set_var("JCODE_JADE_SESSIONS_HELPER", &helper);
+    crate::env::set_var("DAANIO_JADE_SESSIONS_HELPER", &helper);
 
     let sessions_dir = temp.path().join("sessions");
     std::fs::create_dir_all(&sessions_dir).unwrap();
@@ -606,9 +606,9 @@ fn cloud_sessions_sync_dry_run_reports_without_uploading_or_writing_state() {
 #[test]
 fn cloud_sessions_sync_respects_min_interval_throttle() {
     let _guard = crate::storage::lock_test_env();
-    let _saved = SavedEnv::capture(&["JCODE_HOME", "JCODE_JADE_SESSIONS_HELPER"]);
+    let _saved = SavedEnv::capture(&["DAANIO_HOME", "DAANIO_JADE_SESSIONS_HELPER"]);
     let temp = tempfile::tempdir().expect("tempdir");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    crate::env::set_var("DAANIO_HOME", temp.path());
 
     // Helper that would fail loudly if it ever ran during a throttled run.
     let helper = temp.path().join("must_not_run.sh");
@@ -618,7 +618,7 @@ fn cloud_sessions_sync_respects_min_interval_throttle() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    crate::env::set_var("JCODE_JADE_SESSIONS_HELPER", &helper);
+    crate::env::set_var("DAANIO_JADE_SESSIONS_HELPER", &helper);
 
     let sessions_dir = temp.path().join("sessions");
     std::fs::create_dir_all(&sessions_dir).unwrap();
@@ -773,8 +773,8 @@ fn parse_cloud_session_list_json_rejects_unexpected_shapes() {
 
 #[test]
 fn resolve_jade_sessions_helper_prefers_explicit_and_env_paths() {
-    let _saved = SavedEnv::capture(&["JCODE_JADE_SESSIONS_HELPER"]);
-    crate::env::set_var("JCODE_JADE_SESSIONS_HELPER", "/tmp/from-env.py");
+    let _saved = SavedEnv::capture(&["DAANIO_JADE_SESSIONS_HELPER"]);
+    crate::env::set_var("DAANIO_JADE_SESSIONS_HELPER", "/tmp/from-env.py");
 
     assert_eq!(
         resolve_jade_sessions_helper(Some("/tmp/explicit.py")).unwrap(),
@@ -836,20 +836,20 @@ async fn auth_test_choice_plan_leaves_non_compat_provider_unchanged() {
 async fn auth_test_choice_plan_discovers_model_for_local_custom_compat_endpoint() {
     let _env_guard = crate::storage::lock_test_env();
     let _saved = SavedEnv::capture(&[
-        "JCODE_OPENAI_COMPAT_API_BASE",
-        "JCODE_OPENAI_COMPAT_API_KEY_NAME",
-        "JCODE_OPENAI_COMPAT_ENV_FILE",
-        "JCODE_OPENAI_COMPAT_DEFAULT_MODEL",
-        "JCODE_OPENAI_COMPAT_LOCAL_ENABLED",
-        "JCODE_OPENROUTER_API_BASE",
-        "JCODE_OPENROUTER_API_KEY_NAME",
-        "JCODE_OPENROUTER_ENV_FILE",
-        "JCODE_OPENROUTER_ALLOW_NO_AUTH",
+        "DAANIO_OPENAI_COMPAT_API_BASE",
+        "DAANIO_OPENAI_COMPAT_API_KEY_NAME",
+        "DAANIO_OPENAI_COMPAT_ENV_FILE",
+        "DAANIO_OPENAI_COMPAT_DEFAULT_MODEL",
+        "DAANIO_OPENAI_COMPAT_LOCAL_ENABLED",
+        "DAANIO_OPENROUTER_API_BASE",
+        "DAANIO_OPENROUTER_API_KEY_NAME",
+        "DAANIO_OPENROUTER_ENV_FILE",
+        "DAANIO_OPENROUTER_ALLOW_NO_AUTH",
     ]);
     let api_base = spawn_single_response_http_server(200, r#"{"data":[{"id":"llama3.2"}]}"#);
-    crate::env::set_var("JCODE_OPENAI_COMPAT_API_BASE", &api_base);
-    crate::env::remove_var("JCODE_OPENAI_COMPAT_DEFAULT_MODEL");
-    crate::env::remove_var("JCODE_OPENAI_COMPAT_LOCAL_ENABLED");
+    crate::env::set_var("DAANIO_OPENAI_COMPAT_API_BASE", &api_base);
+    crate::env::remove_var("DAANIO_OPENAI_COMPAT_DEFAULT_MODEL");
+    crate::env::remove_var("DAANIO_OPENAI_COMPAT_LOCAL_ENABLED");
     crate::provider_catalog::apply_openai_compatible_profile_env(None);
 
     let plan = auth_test_choice_plan(
@@ -869,15 +869,15 @@ async fn auth_test_choice_plan_discovers_model_for_local_custom_compat_endpoint(
 async fn auth_test_choice_plan_discovers_model_for_hosted_custom_compat_endpoint_with_api_key() {
     let _env_guard = crate::storage::lock_test_env();
     let _saved = SavedEnv::capture(&[
-        "JCODE_OPENAI_COMPAT_API_BASE",
-        "JCODE_OPENAI_COMPAT_API_KEY_NAME",
-        "JCODE_OPENAI_COMPAT_ENV_FILE",
-        "JCODE_OPENAI_COMPAT_DEFAULT_MODEL",
-        "JCODE_OPENAI_COMPAT_LOCAL_ENABLED",
-        "JCODE_OPENROUTER_API_BASE",
-        "JCODE_OPENROUTER_API_KEY_NAME",
-        "JCODE_OPENROUTER_ENV_FILE",
-        "JCODE_OPENROUTER_ALLOW_NO_AUTH",
+        "DAANIO_OPENAI_COMPAT_API_BASE",
+        "DAANIO_OPENAI_COMPAT_API_KEY_NAME",
+        "DAANIO_OPENAI_COMPAT_ENV_FILE",
+        "DAANIO_OPENAI_COMPAT_DEFAULT_MODEL",
+        "DAANIO_OPENAI_COMPAT_LOCAL_ENABLED",
+        "DAANIO_OPENROUTER_API_BASE",
+        "DAANIO_OPENROUTER_API_KEY_NAME",
+        "DAANIO_OPENROUTER_ENV_FILE",
+        "DAANIO_OPENROUTER_ALLOW_NO_AUTH",
         "OPENAI_COMPAT_API_KEY",
         "NO_PROXY",
         "no_proxy",
@@ -890,12 +890,12 @@ async fn auth_test_choice_plan_discovers_model_for_hosted_custom_compat_endpoint
         200,
         r#"{"data":[{"id":"hosted-compatible-model"}]}"#,
     );
-    crate::env::set_var("JCODE_OPENAI_COMPAT_API_BASE", &api_base);
+    crate::env::set_var("DAANIO_OPENAI_COMPAT_API_BASE", &api_base);
     crate::env::set_var("OPENAI_COMPAT_API_KEY", "test-key");
     crate::env::set_var("NO_PROXY", "0.0.0.0,127.0.0.1,localhost");
     crate::env::set_var("no_proxy", "0.0.0.0,127.0.0.1,localhost");
-    crate::env::remove_var("JCODE_OPENAI_COMPAT_DEFAULT_MODEL");
-    crate::env::remove_var("JCODE_OPENAI_COMPAT_LOCAL_ENABLED");
+    crate::env::remove_var("DAANIO_OPENAI_COMPAT_DEFAULT_MODEL");
+    crate::env::remove_var("DAANIO_OPENAI_COMPAT_LOCAL_ENABLED");
     crate::provider_catalog::apply_openai_compatible_profile_env(None);
 
     let resolved = crate::provider_catalog::resolve_openai_compatible_profile(
@@ -922,20 +922,20 @@ async fn auth_test_choice_plan_discovers_model_for_hosted_custom_compat_endpoint
 async fn auth_test_choice_plan_skips_local_custom_compat_endpoint_without_models() {
     let _env_guard = crate::storage::lock_test_env();
     let _saved = SavedEnv::capture(&[
-        "JCODE_OPENAI_COMPAT_API_BASE",
-        "JCODE_OPENAI_COMPAT_API_KEY_NAME",
-        "JCODE_OPENAI_COMPAT_ENV_FILE",
-        "JCODE_OPENAI_COMPAT_DEFAULT_MODEL",
-        "JCODE_OPENAI_COMPAT_LOCAL_ENABLED",
-        "JCODE_OPENROUTER_API_BASE",
-        "JCODE_OPENROUTER_API_KEY_NAME",
-        "JCODE_OPENROUTER_ENV_FILE",
-        "JCODE_OPENROUTER_ALLOW_NO_AUTH",
+        "DAANIO_OPENAI_COMPAT_API_BASE",
+        "DAANIO_OPENAI_COMPAT_API_KEY_NAME",
+        "DAANIO_OPENAI_COMPAT_ENV_FILE",
+        "DAANIO_OPENAI_COMPAT_DEFAULT_MODEL",
+        "DAANIO_OPENAI_COMPAT_LOCAL_ENABLED",
+        "DAANIO_OPENROUTER_API_BASE",
+        "DAANIO_OPENROUTER_API_KEY_NAME",
+        "DAANIO_OPENROUTER_ENV_FILE",
+        "DAANIO_OPENROUTER_ALLOW_NO_AUTH",
     ]);
     let api_base = spawn_single_response_http_server(200, r#"{"data":[]}"#);
-    crate::env::set_var("JCODE_OPENAI_COMPAT_API_BASE", &api_base);
-    crate::env::remove_var("JCODE_OPENAI_COMPAT_DEFAULT_MODEL");
-    crate::env::remove_var("JCODE_OPENAI_COMPAT_LOCAL_ENABLED");
+    crate::env::set_var("DAANIO_OPENAI_COMPAT_API_BASE", &api_base);
+    crate::env::remove_var("DAANIO_OPENAI_COMPAT_DEFAULT_MODEL");
+    crate::env::remove_var("DAANIO_OPENAI_COMPAT_LOCAL_ENABLED");
     crate::provider_catalog::apply_openai_compatible_profile_env(None);
 
     let plan = auth_test_choice_plan(

@@ -119,12 +119,12 @@ class AttributionDelta:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Analyze jcode runtime memory JSONL logs for growth, spikes, attribution, and optimization hints"
+        description="Analyze daanio runtime memory JSONL logs for growth, spikes, attribution, and optimization hints"
     )
     parser.add_argument("paths", nargs="*", help="Specific JSONL files or directories to analyze")
     parser.add_argument(
         "--log-dir",
-        help="Directory containing runtime memory JSONL logs (default: ~/.jcode/logs/memory or $JCODE_HOME/logs/memory)",
+        help="Directory containing runtime memory JSONL logs (default: ~/.daanio/logs/memory or $DAANIO_HOME/logs/memory)",
     )
     parser.add_argument("--days", type=int, default=None, help="Only include files from the last N daily logs")
     parser.add_argument("--top", type=int, default=DEFAULT_TOP_N, help="How many spikes/sessions/deltas to show")
@@ -154,10 +154,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def default_log_dir() -> Path:
-    jcode_home = os.environ.get("JCODE_HOME")
-    if jcode_home:
-        return Path(jcode_home).expanduser() / "logs" / "memory"
-    return Path.home() / ".jcode" / "logs" / "memory"
+    daanio_home = os.environ.get("DAANIO_HOME")
+    if daanio_home:
+        return Path(daanio_home).expanduser() / "logs" / "memory"
+    return Path.home() / ".daanio" / "logs" / "memory"
 
 
 def resolve_paths(args: argparse.Namespace) -> list[Path]:
@@ -704,7 +704,7 @@ def build_incident_assessment(
                 "priority": 1,
                 "action": "Pause or cap the workload creating headless sessions.",
                 "why": "These are live allocations; allocator purge is not the first response.",
-                "commands": ["jcode debug 'server:memory-incident'", "jcode debug 'swarm:list'"],
+                "commands": ["daanio debug 'server:memory-incident'", "daanio debug 'swarm:list'"],
             },
             {
                 "priority": 2,
@@ -719,7 +719,7 @@ def build_incident_assessment(
             {
                 "priority": 4,
                 "action": "Purge only after session cleanup if freed-but-held memory remains high.",
-                "commands": ["jcode debug 'allocator:purge'"],
+                "commands": ["daanio debug 'allocator:purge'"],
             },
         ]
     elif retention_dominates:
@@ -734,12 +734,12 @@ def build_incident_assessment(
             {
                 "priority": 1,
                 "action": "Capture a before/after allocator purge and compare PSS.",
-                "commands": ["jcode debug 'allocator:purge'", "jcode debug 'server:memory-incident'"],
+                "commands": ["daanio debug 'allocator:purge'", "daanio debug 'server:memory-incident'"],
             },
             {
                 "priority": 2,
                 "action": "If retained pages repeatedly regrow, inspect allocation churn and allocator decay.",
-                "commands": ["jcode debug 'allocator'", "jcode debug 'allocator:decay:1000'"],
+                "commands": ["daanio debug 'allocator'", "daanio debug 'allocator:decay:1000'"],
             },
         ]
     elif attributed_state_dominates:
@@ -756,7 +756,7 @@ def build_incident_assessment(
             {
                 "priority": 1,
                 "action": "Start with the heaviest sessions and dominant payload category in this report.",
-                "commands": ["jcode debug 'server:memory'"],
+                "commands": ["daanio debug 'server:memory'"],
             }
         ]
     elif allocator_live >= 1024 * 1024 * 1024:
@@ -774,14 +774,14 @@ def build_incident_assessment(
             {
                 "priority": 1,
                 "action": "Capture full server attribution and add counters for the missing owner.",
-                "commands": ["jcode debug 'server:memory'"],
+                "commands": ["daanio debug 'server:memory'"],
             },
             {
                 "priority": 2,
                 "action": "Use a jemalloc-prof build and heap dump if coverage remains below 50%.",
                 "commands": [
-                    "jcode debug 'allocator:profile:on'",
-                    "jcode debug 'allocator:profile:dump /tmp/jcode-server.heap'",
+                    "daanio debug 'allocator:profile:on'",
+                    "daanio debug 'allocator:profile:dump /tmp/daanio-server.heap'",
                 ],
             },
         ]

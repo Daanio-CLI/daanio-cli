@@ -653,7 +653,7 @@ test("web_vital validates, caps, stores, and appends firehose fields", async () 
       metric_value: 999_999,
       rating: "poor",
       message: "must not persist",
-      url: "https://jcode.sh/private?token=secret",
+      url: "https://daanio.com/private?token=secret",
     })),
     { DB: db, FIREHOSE_WEB: webFirehose },
     makeCtx(),
@@ -833,16 +833,16 @@ test("account_linked joins telemetry_id and account_id", async () => {
 // CORS for the website beacon
 // ---------------------------------------------------------------------------
 
-test("OPTIONS preflight from jcode.sh echoes the origin", async () => {
+test("OPTIONS preflight from daanio.com echoes the origin", async () => {
   const response = await worker.fetch(
     new Request(EVENT_URL, {
       method: "OPTIONS",
-      headers: { Origin: "https://jcode.sh" },
+      headers: { Origin: "https://daanio.com" },
     }),
     { DB: makeDb() },
     makeCtx(),
   );
-  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://jcode.sh");
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://daanio.com");
   assert.equal(response.headers.get("Vary"), "Origin");
   assert.ok(/POST/.test(response.headers.get("Access-Control-Allow-Methods")));
 });
@@ -890,11 +890,11 @@ test("POST responses from the beacon origin carry CORS headers", async () => {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Origin: "https://jcode.sh",
+      Origin: "https://daanio.com",
     },
     body: JSON.stringify(makeWebBody()),
   });
   const response = await worker.fetch(request, { DB: db }, makeCtx());
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://jcode.sh");
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://daanio.com");
 });

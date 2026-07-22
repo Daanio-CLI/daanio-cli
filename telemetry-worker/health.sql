@@ -1,6 +1,6 @@
 -- Telemetry health dashboard query.
 -- Usage:
---   wrangler d1 execute jcode-telemetry --remote --file=health.sql
+--   wrangler d1 execute daanio-telemetry --remote --file=health.sql
 
 WITH install_ids AS (
     SELECT DISTINCT telemetry_id

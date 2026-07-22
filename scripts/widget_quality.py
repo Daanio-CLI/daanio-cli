@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Quantitative quality metrics for Jcode Desktop inline widgets.
+"""Quantitative quality metrics for Daanio Desktop inline widgets.
 
 Captures widget states headlessly and scores each card from its PNG plus the
 geometry in the capture manifest:
@@ -36,7 +36,7 @@ except ImportError:
     sys.exit(2)
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_BIN = ROOT / "target" / "debug" / "jcode-desktop"
+DEFAULT_BIN = ROOT / "target" / "debug" / "daanio-desktop"
 WIDGET_STATES = [
     "hotkey-help",
     "model-picker",
@@ -143,7 +143,7 @@ def main() -> int:
     states = [s for s in args.states.split(",") if s]
     results = {}
     failed = False
-    with tempfile.TemporaryDirectory(prefix="jcode-widget-quality-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="daanio-widget-quality-") as tmp:
         out = Path(tmp)
         for state in states:
             cmd = [

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Deterministic mock jcode gateway for end-to-end iOS app testing.
+"""Deterministic mock daanio gateway for end-to-end iOS app testing.
 
-Speaks the exact wire protocol from `crates/jcode-base/src/gateway.rs` on a
+Speaks the exact wire protocol from `crates/daanio-base/src/gateway.rs` on a
 single TCP port, peeking the request line to route like the real gateway:
   - GET  /health   -> {status, version, gateway}
   - POST /pair     -> {token, server_name, server_version}
@@ -28,7 +28,7 @@ import sys
 
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 SERVER_VERSION = "mock-0.32.0"
-SERVER_NAME = "mock-jcode"
+SERVER_NAME = "mock-daanio"
 DEFAULT_MODELS = [
     "claude-api:claude-fable-5",
     "claude-api:claude-sonnet-4",

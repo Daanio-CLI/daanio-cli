@@ -347,7 +347,7 @@ async fn run_auth_doctor_validation(
         Ok(Ok(())) => "validation passed".to_string(),
         Ok(Err(err)) => err.to_string(),
         Err(_) => format!(
-            "validation timed out after {}s; run `jcode auth-test --provider {}` for detailed output",
+            "validation timed out after {}s; run `daanio auth-test --provider {}` for detailed output",
             AUTH_DOCTOR_VALIDATION_TIMEOUT_SECS, provider.id
         ),
     }
@@ -414,16 +414,16 @@ pub(super) async fn run_provider_current_command(
 
 pub(super) fn run_version_command(emit_json: bool) -> Result<()> {
     let report = VersionReport {
-        version: jcode_build_meta::version().to_string(),
-        semver: jcode_build_meta::semver().to_string(),
-        base_semver: jcode_build_meta::base_semver().to_string(),
-        update_semver: jcode_build_meta::update_semver().to_string(),
-        git_hash: jcode_build_meta::git_hash().to_string(),
-        git_tag: jcode_build_meta::git_tag().to_string(),
+        version: daanio_build_meta::version().to_string(),
+        semver: daanio_build_meta::semver().to_string(),
+        base_semver: daanio_build_meta::base_semver().to_string(),
+        update_semver: daanio_build_meta::update_semver().to_string(),
+        git_hash: daanio_build_meta::git_hash().to_string(),
+        git_tag: daanio_build_meta::git_tag().to_string(),
         build_time: crate::build::current_binary_build_time_string()
             .unwrap_or_else(|| "unknown".to_string()),
-        git_date: jcode_build_meta::git_date().to_string(),
-        release_build: jcode_build_meta::is_release_build(),
+        git_date: daanio_build_meta::git_date().to_string(),
+        release_build: daanio_build_meta::is_release_build(),
     };
 
     if emit_json {
@@ -456,11 +456,11 @@ pub(super) async fn run_usage_command(emit_json: bool) -> Result<()> {
     }
 
     if report.providers.is_empty() {
-        println!("No connected providers");
+        println!("No Daanio gateway usage is available");
         println!();
         println!("Next steps:");
-        println!("- Use `jcode login --provider claude` to connect Claude OAuth.");
-        println!("- Use `jcode login --provider openai` to connect ChatGPT / Codex OAuth.");
+        println!("- Create an API key on https://daanio.com.");
+        println!("- Run `daanio login --provider daanio` to save it securely.");
         return Ok(());
     }
 
@@ -519,7 +519,7 @@ fn select_auth_doctor_providers(
         let provider =
             crate::provider_catalog::resolve_login_provider(provider_arg).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Unknown provider '{}'. Use `jcode provider list` to see valid provider ids.",
+                    "Unknown provider '{}'. Use `daanio provider list` to see valid provider ids.",
                     provider_arg
                 )
             })?;
@@ -559,36 +559,41 @@ fn usage_provider_report(provider: &crate::usage::ProviderUsage) -> UsageProvide
 }
 
 pub(super) fn list_cli_providers() -> Vec<ProviderListEntry> {
-    let choices = [
-        ProviderChoice::Jcode,
-        ProviderChoice::Claude,
-        ProviderChoice::Openai,
-        ProviderChoice::Openrouter,
-        ProviderChoice::Azure,
-        ProviderChoice::Opencode,
-        ProviderChoice::OpencodeGo,
-        ProviderChoice::Zai,
-        ProviderChoice::Kimi,
-        ProviderChoice::Groq,
-        ProviderChoice::Mistral,
-        ProviderChoice::Perplexity,
-        ProviderChoice::TogetherAi,
-        ProviderChoice::Deepinfra,
-        ProviderChoice::Xai,
-        ProviderChoice::Chutes,
-        ProviderChoice::Cerebras,
-        ProviderChoice::AlibabaCodingPlan,
-        ProviderChoice::OpenaiCompatible,
-        ProviderChoice::Cursor,
-        ProviderChoice::Copilot,
-        ProviderChoice::Gemini,
-        ProviderChoice::Antigravity,
-        ProviderChoice::Google,
-        ProviderChoice::Auto,
-    ];
+    let choices: &[ProviderChoice] = if std::env::var_os("DAANIO_FIRST_PARTY_ONLY").is_some() {
+        &[ProviderChoice::Daanio, ProviderChoice::Auto]
+    } else {
+        &[
+            ProviderChoice::Daanio,
+            ProviderChoice::Claude,
+            ProviderChoice::Openai,
+            ProviderChoice::Openrouter,
+            ProviderChoice::Azure,
+            ProviderChoice::Opencode,
+            ProviderChoice::OpencodeGo,
+            ProviderChoice::Zai,
+            ProviderChoice::Kimi,
+            ProviderChoice::Groq,
+            ProviderChoice::Mistral,
+            ProviderChoice::Perplexity,
+            ProviderChoice::TogetherAi,
+            ProviderChoice::Deepinfra,
+            ProviderChoice::Xai,
+            ProviderChoice::Chutes,
+            ProviderChoice::Cerebras,
+            ProviderChoice::AlibabaCodingPlan,
+            ProviderChoice::OpenaiCompatible,
+            ProviderChoice::Cursor,
+            ProviderChoice::Copilot,
+            ProviderChoice::Gemini,
+            ProviderChoice::Antigravity,
+            ProviderChoice::Google,
+            ProviderChoice::Auto,
+        ]
+    };
 
     choices
-        .into_iter()
+        .iter()
+        .copied()
         .map(|choice| {
             if let Some(provider) = provider_init::login_provider_for_choice(&choice) {
                 ProviderListEntry {
@@ -682,14 +687,17 @@ mod tests {
         assert_eq!(before_doctor_provider.status, "not_configured");
         assert!(before_doctor_provider.needs_attention);
         assert!(before_doctor_provider.diagnostics.iter().any(|line| {
-            line == &format!("{} is not configured for jcode yet.", provider.display_name)
+            line == &format!(
+                "{} is not configured for daanio yet.",
+                provider.display_name
+            )
         }));
         assert!(
             before_doctor_provider
                 .recommended_actions
                 .iter()
                 .any(|line| {
-                    line == &format!("Connect it: jcode login --provider {}", provider.id)
+                    line == &format!("Connect it: daanio login --provider {}", provider.id)
                 })
         );
 
@@ -753,7 +761,7 @@ mod tests {
                 .iter()
                 .any(|line| {
                     line == &format!(
-                        "Run runtime verification: jcode auth-test --provider {}",
+                        "Run runtime verification: daanio auth-test --provider {}",
                         provider.id
                     )
                 })
@@ -762,7 +770,7 @@ mod tests {
             after_doctor_provider
                 .recommended_actions
                 .iter()
-                .any(|line| { line == "Review current state: jcode auth status --json" })
+                .any(|line| { line == "Review current state: daanio auth status --json" })
         );
     }
 }

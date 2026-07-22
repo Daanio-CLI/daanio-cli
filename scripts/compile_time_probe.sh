@@ -9,7 +9,7 @@ usage() {
 Usage:
   scripts/compile_time_probe.sh [options]
 
-Runs a full-feature selfdev jcode build with Cargo timings enabled and summarizes
+Runs a full-feature selfdev daanio build with Cargo timings enabled and summarizes
 critical-path-ish rustc units from target/cargo-timings/cargo-timing.html.
 
 Options:
@@ -17,24 +17,24 @@ Options:
   --timing-html <path>      Parse a specific cargo timing HTML file
   --touch <path>            Touch a file before building to simulate an edit
   --profile <name>          Cargo profile to build (default: selfdev)
-  --package <name>          Cargo package to build (default: jcode)
-  --bin <name>              Cargo binary to build (default: jcode)
-  --feature-profile <name>  JCODE_DEV_FEATURE_PROFILE for dev_cargo.sh (default: default)
+  --package <name>          Cargo package to build (default: daanio)
+  --bin <name>              Cargo binary to build (default: daanio)
+  --feature-profile <name>  DAANIO_DEV_FEATURE_PROFILE for dev_cargo.sh (default: default)
   --json <path>             Write the parsed summary JSON to this path
   --top <n>                 Number of slowest units to print (default: 12)
   -h, --help                Show this help
 
 Examples:
   scripts/compile_time_probe.sh --skip-build
-  scripts/compile_time_probe.sh --touch crates/jcode-tui/src/tui/app/input.rs
+  scripts/compile_time_probe.sh --touch crates/daanio-tui/src/tui/app/input.rs
   scripts/compile_time_probe.sh --json target/compile-time-probe.json
 
 Notes:
   - This intentionally defaults to the full/default feature set. It is for
     compile-time isolation work that keeps debug/selfdev behavior production-like.
-  - The "jcode serial stack" summary is not a formal Cargo critical path. It is a
-    focused view of the known long-pole crates: jcode-base, jcode-app-core,
-    jcode-tui, root jcode lib, and jcode bin.
+  - The "daanio serial stack" summary is not a formal Cargo critical path. It is a
+    focused view of the known long-pole crates: daanio-base, daanio-app-core,
+    daanio-tui, root daanio lib, and daanio bin.
 USAGE
 }
 
@@ -42,8 +42,8 @@ skip_build=0
 timing_html=""
 touch_path=""
 profile="selfdev"
-package="jcode"
-bin="jcode"
+package="daanio"
+bin="daanio"
 feature_profile="default"
 json_path=""
 top_n=12
@@ -131,7 +131,7 @@ print(time.perf_counter_ns())
 PY
 )
 
-  JCODE_DEV_FEATURE_PROFILE="$feature_profile" \
+  DAANIO_DEV_FEATURE_PROFILE="$feature_profile" \
     scripts/dev_cargo.sh build --profile "$profile" -p "$package" --bin "$bin" --timings
 
   end_ns=$(python3 - <<'PY'
@@ -246,22 +246,22 @@ for unit in units:
 # Slowest rustc-ish units by duration. Keep build-script run units visible but low-noise.
 top_units = sorted(units, key=lambda unit: float(unit.get("duration", 0.0)), reverse=True)[:top_n]
 
-def is_jcode_stack_unit(unit: dict[str, Any]) -> bool:
+def is_daanio_stack_unit(unit: dict[str, Any]) -> bool:
     name = unit.get("name")
     target = unit.get("target") or ""
-    if name in {"jcode-base", "jcode-app-core", "jcode-tui"} and "build script" not in target:
+    if name in {"daanio-base", "daanio-app-core", "daanio-tui"} and "build script" not in target:
         return True
-    if name == "jcode" and (target == "" or f'bin "{bin_name}"' in target):
+    if name == "daanio" and (target == "" or f'bin "{bin_name}"' in target):
         return True
     return False
 
-jcode_stack = sorted([unit for unit in units if is_jcode_stack_unit(unit)], key=lambda unit: float(unit.get("start", 0.0)))
+daanio_stack = sorted([unit for unit in units if is_daanio_stack_unit(unit)], key=lambda unit: float(unit.get("start", 0.0)))
 stack_span = None
-if jcode_stack:
-    stack_span = max(float(unit["end"]) for unit in jcode_stack) - min(float(unit.get("start", 0.0)) for unit in jcode_stack)
-stack_sum = sum(float(unit.get("duration", 0.0)) for unit in jcode_stack)
-stack_frontend_sum = sum(float(unit.get("frontend_duration") or 0.0) for unit in jcode_stack)
-stack_codegen_sum = sum(float(unit.get("codegen_duration") or 0.0) for unit in jcode_stack)
+if daanio_stack:
+    stack_span = max(float(unit["end"]) for unit in daanio_stack) - min(float(unit.get("start", 0.0)) for unit in daanio_stack)
+stack_sum = sum(float(unit.get("duration", 0.0)) for unit in daanio_stack)
+stack_frontend_sum = sum(float(unit.get("frontend_duration") or 0.0) for unit in daanio_stack)
+stack_codegen_sum = sum(float(unit.get("codegen_duration") or 0.0) for unit in daanio_stack)
 
 summary = {
     "timing_html": str(html_path),
@@ -285,7 +285,7 @@ summary = {
         }
         for unit in top_units
     ],
-    "jcode_serial_stack": {
+    "daanio_serial_stack": {
         "span_seconds": round(stack_span, 3) if stack_span is not None else None,
         "sum_unit_seconds": round(stack_sum, 3),
         "sum_frontend_seconds": round(stack_frontend_sum, 3),
@@ -301,7 +301,7 @@ summary = {
                 "codegen_seconds": round(unit["codegen_duration"], 3) if unit.get("codegen_duration") is not None else None,
                 "features": unit.get("features") or [],
             }
-            for unit in jcode_stack
+            for unit in daanio_stack
         ],
     },
 }
@@ -316,10 +316,10 @@ print(f"  cargo timing wall: {fmt_seconds(summary['wall_seconds_from_cargo_timin
 if summary["wall_seconds_measured_by_probe"] is not None:
     print(f"  measured wall: {fmt_seconds(summary['wall_seconds_measured_by_probe'])}")
 print(f"  units: {len(units)}")
-print("  jcode serial stack:")
+print("  daanio serial stack:")
 print(f"    span: {fmt_seconds(stack_span)}")
 print(f"    sum: {stack_sum:.2f}s (frontend {stack_frontend_sum:.2f}s, codegen {stack_codegen_sum:.2f}s)")
-for unit in jcode_stack:
+for unit in daanio_stack:
     target = unit.get("target") or "lib"
     frontend = fmt_seconds(unit.get("frontend_duration"))
     codegen = fmt_seconds(unit.get("codegen_duration"))

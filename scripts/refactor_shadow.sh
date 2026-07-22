@@ -7,44 +7,44 @@ umask 077
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 user_name="${USER:-$(id -un)}"
 runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
-default_home="${HOME}/.jcode-refactor"
-default_socket="${runtime_dir}/jcode-refactor-${user_name}.sock"
+default_home="${HOME}/.daanio-refactor"
+default_socket="${runtime_dir}/daanio-refactor-${user_name}.sock"
 
-ref_home="${JCODE_REF_HOME:-$default_home}"
-ref_socket="${JCODE_REF_SOCKET:-$default_socket}"
-ref_profile="${JCODE_REF_PROFILE:-debug}"
+ref_home="${DAANIO_REF_HOME:-$default_home}"
+ref_socket="${DAANIO_REF_SOCKET:-$default_socket}"
+ref_profile="${DAANIO_REF_PROFILE:-debug}"
 
 case "$ref_profile" in
-  debug) default_bin="$repo_root/target/debug/jcode" ;;
-  release) default_bin="$repo_root/target/release/jcode" ;;
+  debug) default_bin="$repo_root/target/debug/daanio" ;;
+  release) default_bin="$repo_root/target/release/daanio" ;;
   *)
-    printf 'error: unsupported JCODE_REF_PROFILE: %s (expected debug or release)\n' "$ref_profile" >&2
+    printf 'error: unsupported DAANIO_REF_PROFILE: %s (expected debug or release)\n' "$ref_profile" >&2
     exit 1
     ;;
 esac
 
-ref_bin="${JCODE_REF_BIN:-$default_bin}"
+ref_bin="${DAANIO_REF_BIN:-$default_bin}"
 
 usage() {
   cat <<'USAGE'
 Usage:
   scripts/refactor_shadow.sh env
   scripts/refactor_shadow.sh build [--release]
-  scripts/refactor_shadow.sh serve [-- <jcode serve args>]
-  scripts/refactor_shadow.sh run [-- <jcode args>]
-  scripts/refactor_shadow.sh connect [-- <jcode connect args>]
+  scripts/refactor_shadow.sh serve [-- <daanio serve args>]
+  scripts/refactor_shadow.sh run [-- <daanio args>]
+  scripts/refactor_shadow.sh connect [-- <daanio connect args>]
   scripts/refactor_shadow.sh check
 
 What it does:
-  - Runs jcode in an isolated refactor environment
-  - Uses separate JCODE_HOME and JCODE_SOCKET
-  - Refuses to run against ~/.jcode to protect live sessions
+  - Runs daanio in an isolated refactor environment
+  - Uses separate DAANIO_HOME and DAANIO_SOCKET
+  - Refuses to run against ~/.daanio to protect live sessions
 
 Environment overrides:
-  JCODE_REF_HOME      Isolated home dir (default: ~/.jcode-refactor)
-  JCODE_REF_SOCKET    Isolated socket path
-  JCODE_REF_PROFILE   debug|release (default: debug)
-  JCODE_REF_BIN       Explicit jcode binary path
+  DAANIO_REF_HOME      Isolated home dir (default: ~/.daanio-refactor)
+  DAANIO_REF_SOCKET    Isolated socket path
+  DAANIO_REF_PROFILE   debug|release (default: debug)
+  DAANIO_REF_BIN       Explicit daanio binary path
 USAGE
 }
 
@@ -54,14 +54,14 @@ die() {
 }
 
 assert_safe_paths() {
-  [[ -n "$ref_home" ]] || die "JCODE_REF_HOME resolved to empty path"
-  [[ -n "$ref_socket" ]] || die "JCODE_REF_SOCKET resolved to empty path"
-  [[ "$ref_home" = /* ]] || die "JCODE_REF_HOME must be an absolute path: $ref_home"
-  [[ "$ref_socket" = /* ]] || die "JCODE_REF_SOCKET must be an absolute path: $ref_socket"
+  [[ -n "$ref_home" ]] || die "DAANIO_REF_HOME resolved to empty path"
+  [[ -n "$ref_socket" ]] || die "DAANIO_REF_SOCKET resolved to empty path"
+  [[ "$ref_home" = /* ]] || die "DAANIO_REF_HOME must be an absolute path: $ref_home"
+  [[ "$ref_socket" = /* ]] || die "DAANIO_REF_SOCKET must be an absolute path: $ref_socket"
 
-  local prod_home="${HOME}/.jcode"
+  local prod_home="${HOME}/.daanio"
   if [[ "$ref_home" == "$prod_home" ]]; then
-    die "refusing to run with production home ($prod_home); set JCODE_REF_HOME to an isolated path"
+    die "refusing to run with production home ($prod_home); set DAANIO_REF_HOME to an isolated path"
   fi
 }
 
@@ -83,7 +83,7 @@ ensure_socket_parent() {
 
 ensure_binary() {
   if [[ ! -x "$ref_bin" ]]; then
-    die "jcode binary not found or not executable: $ref_bin (run 'scripts/refactor_shadow.sh build')"
+    die "daanio binary not found or not executable: $ref_bin (run 'scripts/refactor_shadow.sh build')"
   fi
 }
 
@@ -102,7 +102,7 @@ remove_stale_socket() {
 }
 
 run_isolated() {
-  JCODE_HOME="$ref_home" JCODE_SOCKET="$ref_socket" "$@"
+  DAANIO_HOME="$ref_home" DAANIO_SOCKET="$ref_socket" "$@"
 }
 
 normalize_args() {
@@ -114,13 +114,13 @@ normalize_args() {
 
 cmd_env() {
   cat <<EOF_OUT
-JCODE_REF_HOME=$ref_home
-JCODE_REF_SOCKET=$ref_socket
-JCODE_REF_PROFILE=$ref_profile
-JCODE_REF_BIN=$ref_bin
+DAANIO_REF_HOME=$ref_home
+DAANIO_REF_SOCKET=$ref_socket
+DAANIO_REF_PROFILE=$ref_profile
+DAANIO_REF_BIN=$ref_bin
 
 # One-off command example:
-JCODE_HOME=$ref_home JCODE_SOCKET=$ref_socket $ref_bin --version
+DAANIO_HOME=$ref_home DAANIO_SOCKET=$ref_socket $ref_bin --version
 EOF_OUT
 }
 

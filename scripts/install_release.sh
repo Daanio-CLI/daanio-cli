@@ -3,15 +3,15 @@
 # update the stable + current channel symlinks, and point the launcher at current.
 #
 # Paths after install:
-# - ~/.jcode/builds/versions/<hash>/jcode (immutable)
-# - ~/.jcode/builds/stable/jcode -> .../versions/<hash>/jcode
-# - ~/.jcode/builds/current/jcode -> .../versions/<hash>/jcode
-# - ~/.local/bin/jcode -> ~/.jcode/builds/current/jcode (launcher)
+# - ~/.daanio/builds/versions/<hash>/daanio (immutable)
+# - ~/.daanio/builds/stable/daanio -> .../versions/<hash>/daanio
+# - ~/.daanio/builds/current/daanio -> .../versions/<hash>/daanio
+# - ~/.local/bin/daanio -> ~/.daanio/builds/current/daanio (launcher)
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
-profile="${JCODE_RELEASE_PROFILE:-release-lto}"
+profile="${DAANIO_RELEASE_PROFILE:-release-lto}"
 if [[ "${1:-}" == "--fast" ]]; then
   profile="release"
   shift
@@ -36,7 +36,7 @@ case "$profile" in
 esac
 
 cargo build --profile "$profile" --manifest-path "$repo_root/Cargo.toml"
-bin="$repo_root/target/$profile/jcode"
+bin="$repo_root/target/$profile/daanio"
 
 if [[ ! -x "$bin" ]]; then
   echo "Release binary not found: $bin" >&2
@@ -57,16 +57,16 @@ if [[ -z "$hash" ]]; then
   hash="$(date +%Y%m%d%H%M%S)"
 fi
 
-# Install versioned binary into ~/.jcode/builds/versions/<hash>/
-builds_dir="$HOME/.jcode/builds"
+# Install versioned binary into ~/.daanio/builds/versions/<hash>/
+builds_dir="$HOME/.daanio/builds"
 version_dir="$builds_dir/versions/$hash"
 mkdir -p "$version_dir"
-install -m 755 "$bin" "$version_dir/jcode"
+install -m 755 "$bin" "$version_dir/daanio"
 
 # Update stable symlink
 stable_dir="$builds_dir/stable"
 mkdir -p "$stable_dir"
-ln -sfn "$version_dir/jcode" "$stable_dir/jcode"
+ln -sfn "$version_dir/daanio" "$stable_dir/daanio"
 
 # Update stable-version marker
 printf '%s\n' "$hash" > "$builds_dir/stable-version"
@@ -74,26 +74,26 @@ printf '%s\n' "$hash" > "$builds_dir/stable-version"
 # Update current symlink + marker
 current_dir="$builds_dir/current"
 mkdir -p "$current_dir"
-ln -sfn "$version_dir/jcode" "$current_dir/jcode"
+ln -sfn "$version_dir/daanio" "$current_dir/daanio"
 printf '%s\n' "$hash" > "$builds_dir/current-version"
 
 # Update launcher path to current channel
-install_dir="${JCODE_INSTALL_DIR:-$HOME/.local/bin}"
+install_dir="${DAANIO_INSTALL_DIR:-$HOME/.local/bin}"
 mkdir -p "$install_dir"
-ln -sfn "$current_dir/jcode" "$install_dir/jcode"
+ln -sfn "$current_dir/daanio" "$install_dir/daanio"
 
-echo "Installed: $version_dir/jcode"
-echo "Updated stable symlink: $stable_dir/jcode -> $version_dir/jcode"
-echo "Updated current symlink: $current_dir/jcode -> $version_dir/jcode"
-echo "Updated launcher symlink: $install_dir/jcode -> $current_dir/jcode"
+echo "Installed: $version_dir/daanio"
+echo "Updated stable symlink: $stable_dir/daanio -> $version_dir/daanio"
+echo "Updated current symlink: $current_dir/daanio -> $version_dir/daanio"
+echo "Updated launcher symlink: $install_dir/daanio -> $current_dir/daanio"
 
 # Configure supported desktop launch hotkeys as part of installation. This is
 # idempotent and best-effort because headless installs may not expose a desktop
 # session; the first interactive launch retries automatically.
 case "$(uname -s)" in
   Darwin|Linux)
-    if "$install_dir/jcode" setup-hotkey </dev/null >/dev/null 2>&1; then
-      echo "Configured system-wide jcode launch hotkeys (when supported)."
+    if "$install_dir/daanio" setup-hotkey </dev/null >/dev/null 2>&1; then
+      echo "Configured system-wide daanio launch hotkeys (when supported)."
     fi
     ;;
 esac
@@ -102,9 +102,9 @@ esac
 # installed (issue #291). `server reload` only reloads when the running daemon
 # is genuinely older, hands live headless/swarm sessions to the new process, and
 # is a no-op when no server is running, so it is safe to call unconditionally.
-if [ "${JCODE_SKIP_SERVER_RELOAD:-}" != "1" ]; then
-  if "$install_dir/jcode" server reload </dev/null >/dev/null 2>&1; then
-    echo "Reloaded the running jcode server onto $hash (if one was active)."
+if [ "${DAANIO_SKIP_SERVER_RELOAD:-}" != "1" ]; then
+  if "$install_dir/daanio" server reload </dev/null >/dev/null 2>&1; then
+    echo "Reloaded the running daanio server onto $hash (if one was active)."
   fi
 fi
 
@@ -116,4 +116,4 @@ fi
 # Ensure the launcher dir is on PATH for bash, zsh and fish in future shells.
 # shellcheck source=scripts/lib/configure_path.sh
 . "$(dirname "$0")/lib/configure_path.sh"
-jcode_configure_path "$install_dir"
+daanio_configure_path "$install_dir"

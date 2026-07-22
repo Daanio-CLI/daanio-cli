@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Daanio Desktop (Beta)
+GenericName=AI Development Workspace
+Comment=Daanio fullscreen desktop workspace (beta)
+Exec=daanio-desktop
+Icon=daanio
+Terminal=false
+Categories=Development;IDE;
+StartupNotify=true
+Keywords=Daanio;AI;Agent;Development;Workspace;

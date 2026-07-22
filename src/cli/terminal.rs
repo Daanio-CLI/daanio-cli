@@ -10,8 +10,8 @@ pub struct TuiRuntimeState {
     focus_change: bool,
 }
 
-const INHERITED_MODES_ENV: &str = "JCODE_TUI_INHERITED_MODES";
-const INHERITED_THEME_ENV: &str = "JCODE_TUI_INHERITED_THEME";
+const INHERITED_MODES_ENV: &str = "DAANIO_TUI_INHERITED_MODES";
+const INHERITED_THEME_ENV: &str = "DAANIO_TUI_INHERITED_THEME";
 
 // Crossterm's Windows implementation enables Win32 console mouse input but does
 // not emit the VT mouse-tracking modes. Windows Terminal and other ConPTY hosts
@@ -235,7 +235,7 @@ pub fn show_crash_resume_hint() {
 
     if crashed.len() == 1 {
         eprintln!(
-            "{yellow}💥 Session {bold}{}{reset}{yellow} crashed. Resume with:{reset}  jcode --resume {}",
+            "{yellow}💥 Session {bold}{}{reset}{yellow} crashed. Resume with:{reset}  daanio --resume {}",
             session_label, id
         );
     } else {
@@ -244,15 +244,15 @@ pub fn show_crash_resume_hint() {
             crashed.len(),
             session_label
         );
-        eprintln!("{yellow}   Resume with:{reset}  jcode --resume {}", id);
-        eprintln!("{yellow}   List all:{reset}     jcode --resume");
+        eprintln!("{yellow}   Resume with:{reset}  daanio --resume {}", id);
+        eprintln!("{yellow}   List all:{reset}     daanio --resume");
     }
     eprintln!();
 }
 
 fn init_tui_terminal(inherited_terminal: bool) -> Result<ratatui::DefaultTerminal> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        anyhow::bail!("jcode TUI requires an interactive terminal (stdin/stdout must be a TTY)");
+        anyhow::bail!("daanio TUI requires an interactive terminal (stdin/stdout must be a TTY)");
     }
     if inherited_terminal {
         init_tui_terminal_resume()
@@ -267,13 +267,13 @@ fn init_tui_terminal(inherited_terminal: bool) -> Result<ratatui::DefaultTermina
 }
 
 pub fn init_tui_runtime() -> Result<(ratatui::DefaultTerminal, TuiRuntimeGuard)> {
-    let is_resuming = std::env::var_os("JCODE_RESUMING").is_some();
+    let is_resuming = std::env::var_os("DAANIO_RESUMING").is_some();
     let inherited_theme = std::env::var(INHERITED_THEME_ENV).ok();
     let inherited_modes_raw = std::env::var(INHERITED_MODES_ENV).ok();
     let inherited_modes = inherited_modes_raw
         .as_deref()
         .and_then(InheritedTerminalModes::decode);
-    // JCODE_RESUMING describes the session lifecycle, but only a valid modes
+    // DAANIO_RESUMING describes the session lifecycle, but only a valid modes
     // handoff proves the previous process deliberately left the terminal live
     // across exec. A restart used to restore the terminal before exec while the
     // new process still took the resume path, leaving it on the primary screen
@@ -288,13 +288,13 @@ pub fn init_tui_runtime() -> Result<(ratatui::DefaultTerminal, TuiRuntimeGuard)>
         crate::tui::theme_detect::init_theme_mode();
     }
     let terminal = init_tui_terminal(inherited_terminal)?;
-    crate::tui::mermaid::install_jcode_mermaid_hooks();
-    crate::tui::markdown::install_jcode_markdown_hooks();
+    crate::tui::mermaid::install_daanio_mermaid_hooks();
+    crate::tui::markdown::install_daanio_markdown_hooks();
     crate::tui::mermaid::init_picker();
 
     let perf_policy = crate::perf::tui_policy();
     // These private handoff values apply only to this exec boundary. Avoid
-    // leaking them into tools or unrelated child jcode processes.
+    // leaking them into tools or unrelated child daanio processes.
     crate::env::remove_var(INHERITED_MODES_ENV);
     crate::env::remove_var(INHERITED_THEME_ENV);
 
@@ -457,7 +457,7 @@ fn write_session_resume_hint(mut writer: impl Write, session_id: &str) -> io::Re
         "\x1b[33mSession \x1b[1m{}\x1b[0m\x1b[33m - to resume:\x1b[0m",
         session_name
     )?;
-    writeln!(writer, "  jcode --resume {}", session_id)?;
+    writeln!(writer, "  daanio --resume {}", session_id)?;
     writeln!(writer)?;
     Ok(())
 }
@@ -704,7 +704,7 @@ mod tests {
             let mut output = Vec::new();
             write_session_resume_hint(&mut output, &session_id).unwrap();
             let output = String::from_utf8(output).unwrap();
-            let expected_cmd = format!("jcode --resume {}", session_id);
+            let expected_cmd = format!("daanio --resume {}", session_id);
             assert!(output.contains(&expected_cmd));
             assert!(output.contains("to resume"));
             assert!(!session_id.is_empty());

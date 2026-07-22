@@ -1,9 +1,9 @@
--- Canonical "total users" definitions for jcode telemetry.
+-- Canonical "total users" definitions for daanio telemetry.
 -- Usage:
---   wrangler d1 execute jcode-telemetry --remote --file=users.sql
+--   wrangler d1 execute daanio-telemetry --remote --file=users.sql
 --
 -- Headline number: total_users. A "user" is a distinct, non-CI telemetry_id that
--- ever either installed jcode or did meaningful work in it. We exclude CI traffic
+-- ever either installed daanio or did meaningful work in it. We exclude CI traffic
 -- (ephemeral runners mint a fresh id per job) and exclude empty open/close
 -- sessions that never did anything. Raw, less-filtered tiers are reported
 -- alongside it so no signal is hidden.
@@ -42,7 +42,7 @@ WITH install_ids AS (
     SELECT DISTINCT telemetry_id FROM events WHERE is_ci = 1
 )
 SELECT
-    -- HEADLINE: real people who installed or meaningfully used jcode.
+    -- HEADLINE: real people who installed or meaningfully used daanio.
     (SELECT COUNT(*) FROM (
         SELECT telemetry_id FROM install_ids
         UNION
@@ -52,7 +52,7 @@ SELECT
     -- Core users: did meaningful work (excludes install-only, never-used ids).
     (SELECT COUNT(*) FROM meaningful_ids) AS core_users,
 
-    -- Reach: every distinct non-CI id that ever launched jcode (incl. empty
+    -- Reach: every distinct non-CI id that ever launched daanio (incl. empty
     -- open/close sessions). Upper bound on "people who ran it at least once".
     (SELECT COUNT(*) FROM reached_ids) AS reached_users,
 

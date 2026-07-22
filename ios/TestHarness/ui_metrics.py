@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""UI efficiency analyzer for jcode iOS screenshots.
+"""UI efficiency analyzer for daanio iOS screenshots.
 
 Turns "this looks ugly" into hill-climbable numbers. Given a PNG screenshot
 (from `xcrun simctl io ... screenshot`), it scores the rendered UI on
@@ -30,7 +30,7 @@ from dataclasses import dataclass, asdict
 import numpy as np
 from PIL import Image, ImageDraw
 
-# --- Design tokens (must mirror Sources/JCodeMobile/Theme.swift) -------------
+# --- Design tokens (must mirror Sources/DaanioMobile/Theme.swift) -------------
 TOKENS = {
     "background": 0x0F0F14,
     "surface": 0x1A1A1F,

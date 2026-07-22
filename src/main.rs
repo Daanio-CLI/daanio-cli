@@ -36,7 +36,7 @@ fn configure_system_allocator() {
     const M_ARENA_MAX: i32 = -8;
     const M_MMAP_THRESHOLD: i32 = -3;
 
-    let arena_max = parse_alloc_tuning_env("JCODE_GLIBC_ARENA_MAX", 4);
+    let arena_max = parse_alloc_tuning_env("DAANIO_GLIBC_ARENA_MAX", 4);
     let _ = unsafe { mallopt(M_ARENA_MAX, arena_max) };
 
     // Pin the mmap threshold so large transient allocations (history JSON,
@@ -51,7 +51,7 @@ fn configure_system_allocator() {
     // alloc/free cycles (mmap/munmap syscalls + page faults each time) for
     // predictable, immediate memory return. For a long-running interactive
     // agent, lower steady-state RSS wins.
-    let mmap_threshold = parse_alloc_tuning_env("JCODE_GLIBC_MMAP_THRESHOLD", 256 * 1024);
+    let mmap_threshold = parse_alloc_tuning_env("DAANIO_GLIBC_MMAP_THRESHOLD", 256 * 1024);
     let _ = unsafe { mallopt(M_MMAP_THRESHOLD, mmap_threshold) };
 }
 
@@ -80,11 +80,11 @@ fn main() -> Result<()> {
     // Unix environments where most development happens. The CLI/provider setup
     // path can exceed that reserve before Tokio takes over, producing an
     // unrecoverable STATUS_STACK_OVERFLOW. Keep the linker defaults unchanged
-    // for every auxiliary binary and run the Jcode entry point on a deliberately
+    // for every auxiliary binary and run the Daanio entry point on a deliberately
     // sized stack instead.
     const WINDOWS_MAIN_STACK_SIZE: usize = 8 * 1024 * 1024;
     match std::thread::Builder::new()
-        .name("jcode-main".to_string())
+        .name("daanio-main".to_string())
         .stack_size(WINDOWS_MAIN_STACK_SIZE)
         .spawn(run_main)?
         .join()
@@ -104,12 +104,12 @@ fn run_main() -> Result<()> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     // SessionStart hooks should be effectively invisible to Claude Code and
-    // Codex. Handle this tiny callback before the Tokio runtime and normal Jcode
+    // Codex. Handle this tiny callback before the Tokio runtime and normal Daanio
     // startup path so it does not initialize providers, start cleanup threads,
     // check for updates, or emit first-run telemetry disclosure text into the
     // parent CLI's hook output.
     if let Some(source) = cli_launch_hint_source_invocation() {
-        return jcode::setup_hints::run_setup_hotkey(false, false, false, Some(&source));
+        return daanio::setup_hints::run_setup_hotkey(false, false, false, Some(&source));
     }
 
     // The macOS global-hotkey listener must run on the real main thread with a
@@ -118,17 +118,17 @@ fn run_main() -> Result<()> {
     // otherwise move execution onto a worker thread with no run loop and leave
     // the Cmd+; hotkey silently dead.
     if is_macos_hotkey_listener_invocation() {
-        return jcode::setup_hints::run_macos_hotkey_listener_main_thread();
+        return daanio::setup_hints::run_macos_hotkey_listener_main_thread();
     }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
 
-    runtime.block_on(async { jcode::run().await })
+    runtime.block_on(async { daanio::run().await })
 }
 
-/// True when invoked as `jcode setup-hotkey --listen-macos-hotkey`.
+/// True when invoked as `daanio setup-hotkey --listen-macos-hotkey`.
 fn is_macos_hotkey_listener_invocation() -> bool {
     args_are_macos_hotkey_listener(std::env::args().skip(1))
 }
