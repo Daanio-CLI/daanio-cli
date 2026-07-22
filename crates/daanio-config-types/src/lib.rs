@@ -821,7 +821,7 @@ pub struct AutoReviewConfig {
 /// Partner discovery makes third-party developer tools discoverable to the
 /// agent via a configured hosted directory. It is disabled in the Daanio fork
 /// until the operator explicitly supplies and enables an endpoint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SponsorsConfig {
     /// Enable tool partner discovery. Disabled by default. When false, no
@@ -831,15 +831,6 @@ pub struct SponsorsConfig {
     pub enabled: bool,
     /// Base URL of the discovery endpoint.
     pub endpoint: String,
-}
-
-impl Default for SponsorsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            endpoint: String::new(),
-        }
-    }
 }
 
 /// Automatic end-of-turn execution judging configuration.
