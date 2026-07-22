@@ -1,0 +1,15 @@
+{
+  "version": "0.1.0-daanio.2",
+  "date": "2026-07-23",
+  "title": "Secure Windows distribution",
+  "highlights": [
+    "Adds prebuilt x86_64 and ARM64 Windows release support with DigiCert Authenticode signing backed by a non-exportable Google Cloud HSM key"
+  ],
+  "improvements": [
+    "Keeps all Google signing credentials outside the public GitHub repository while providing one-command private certificate setup and release signing",
+    "Publishes signed Windows executables, archives, and updated SHA-256 checksums for direct installation"
+  ],
+  "fixes": [
+    "Release binaries now preserve the complete Daanio prerelease version so installers can verify tags such as v0.1.0-daanio.2 correctly"
+  ]
+}
