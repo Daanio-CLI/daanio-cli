@@ -307,6 +307,7 @@ jobs:
       WINDOWS_SIGNING_ACCOUNT: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
       WINDOWS_SIGNING_CERTIFICATE_PROFILE: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_PROFILE }}
       WINDOWS_SIGNING_REQUIRED: ${{ vars.WINDOWS_SIGNING_REQUIRED }}
+      WINDOWS_SIGNING_PROVIDER: ${{ vars.WINDOWS_SIGNING_PROVIDER }}
     steps:
       - name: Download unsigned Windows binaries
         uses: actions/download-artifact@v4
@@ -318,6 +319,14 @@ jobs:
         id: signing
         shell: pwsh
         run: |
+          $provider = ([string]$env:WINDOWS_SIGNING_PROVIDER).Trim().ToLowerInvariant()
+          if ($provider -eq 'manual') {
+            'enabled=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            'manual=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host 'Manual Windows signing mode: unsigned binaries remain GitHub Actions artifacts and are not release assets.'
+            exit 0
+          }
+
           $requiredValues = @(
             $env:AZURE_CLIENT_ID,
             $env:AZURE_TENANT_ID,
@@ -328,6 +337,7 @@ jobs:
           )
           $configured = -not ($requiredValues | Where-Object { [string]::IsNullOrWhiteSpace($_) })
           "enabled=$($configured.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          'manual=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
           $signingRequired = $env:WINDOWS_SIGNING_REQUIRED -ne 'false'
           if (-not $configured -and $signingRequired) {
@@ -360,6 +370,7 @@ jobs:
           timestamp-digest: SHA256
 
       - name: Verify signatures and package Windows assets
+        if: steps.signing.outputs.enabled == 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
@@ -384,6 +395,7 @@ jobs:
           }
 
       - name: Upload final Windows artifacts
+        if: steps.signing.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: daanio-windows-x86_64
@@ -392,6 +404,7 @@ jobs:
             dist/daanio-windows-x86_64.tar.gz
 
       - name: Upload final Windows ARM64 artifacts
+        if: steps.signing.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: daanio-windows-aarch64
@@ -400,12 +413,26 @@ jobs:
             dist/daanio-windows-aarch64.tar.gz
 
       - name: Publish Windows assets to release
+        if: steps.signing.outputs.enabled == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           gh release upload "${env:GITHUB_REF_NAME}" dist/daanio-windows-x86_64.exe dist/daanio-windows-x86_64.tar.gz dist/daanio-windows-aarch64.exe dist/daanio-windows-aarch64.tar.gz --clobber
+
+      - name: Record manual signing instructions
+        if: steps.signing.outputs.manual == 'true'
+        shell: pwsh
+        run: |
+          @'
+          ## Windows signing is manual
+
+          The unsigned `windows-unsigned-x86_64` and `windows-unsigned-aarch64`
+          workflow artifacts are ready for the private signing workstation.
+          Follow `docs/WINDOWS_MANUAL_SIGNING.md`; never publish these unsigned
+          binaries as official release assets.
+          '@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
   build-freebsd:
     name: Build (x86_64-unknown-freebsd)
