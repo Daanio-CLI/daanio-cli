@@ -253,19 +253,42 @@ sign_file() {
   # Get-AuthenticodeSignature check is still required on Windows.
   signature_file="$target.sig"
   signature_certificates="$target.sig.certificates.pem"
+  signature_certificate_dir="$target.sig.certificates"
   signature_public_key="$target.sig.public-key.der"
   signature_structure="$target.sig.asn1.txt"
   rm -f "$signature_file" "$signature_certificates" "$signature_public_key" "$signature_structure"
+  mkdir -p "$signature_certificate_dir"
   "${jsign_command[@]}" extract --format DER "$target"
   [ -s "$signature_file" ] || err "Jsign did not extract an embedded signature from $target"
   openssl pkcs7 -inform DER -in "$signature_file" -print_certs -out "$signature_certificates"
-  openssl x509 -in "$signature_certificates" -pubkey -noout |
-    openssl pkey -pubin -outform DER -out "$signature_public_key"
-  embedded_fingerprint="$(sha256_value "$signature_public_key")"
-  [ "$embedded_fingerprint" = "$certificate_fingerprint" ] ||
-    err "embedded signer certificate does not match the configured DigiCert certificate"
+  awk -v output_dir="$signature_certificate_dir" '
+    /-----BEGIN CERTIFICATE-----/ {
+      certificate_count++
+      output_file = sprintf("%s/certificate-%d.pem", output_dir, certificate_count)
+    }
+    output_file != "" { print > output_file }
+    /-----END CERTIFICATE-----/ {
+      close(output_file)
+      output_file = ""
+    }
+  ' "$signature_certificates"
+
+  embedded_certificate_matches=false
+  for embedded_certificate in "$signature_certificate_dir"/certificate-*.pem; do
+    [ -f "$embedded_certificate" ] || continue
+    openssl x509 -in "$embedded_certificate" -pubkey -noout |
+      openssl pkey -pubin -outform DER -out "$signature_public_key"
+    embedded_fingerprint="$(sha256_value "$signature_public_key")"
+    if [ "$embedded_fingerprint" = "$certificate_fingerprint" ]; then
+      embedded_certificate_matches=true
+      break
+    fi
+  done
+  [ "$embedded_certificate_matches" = true ] ||
+    err "no embedded signer certificate matches the configured DigiCert certificate"
   openssl asn1parse -inform DER -in "$signature_file" -i > "$signature_structure"
   grep -Fq 'id-smime-ct-TSTInfo' "$signature_structure" || err "signed file has no RFC 3161 timestamp token"
+  rm -rf -- "$signature_certificate_dir"
   rm -f "$signature_file" "$signature_certificates" "$signature_public_key" "$signature_structure"
   success "Embedded Authenticode signer and RFC 3161 timestamp validated: $(basename "$target")"
 }
