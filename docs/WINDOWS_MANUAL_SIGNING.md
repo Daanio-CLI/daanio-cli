@@ -10,6 +10,24 @@ The KMS private key never leaves Google Cloud. The short-lived Google access
 token is used only inside the operator's Cloud Shell and must never be added to
 GitHub Secrets, command output, release assets, or repository files.
 
+## One-time DigiCert certificate setup
+
+After downloading and extracting DigiCert's three-certificate package in the
+private Cloud Shell, prepare the signing chain with:
+
+```bash
+cd "$HOME/daanio-cli"
+scripts/setup_windows_signing_certificate.sh \
+  --source "$HOME/lpb_trading_corporation_1487873917 3"
+```
+
+The setup script accepts PEM or DER `.crt` files. It verifies the DigiCert root
+and intermediate chain, the LPB Trading Corporation subject, `Code Signing`
+extended-key usage, the live HSM state, and the exact public-key match before
+creating `$HOME/issued-windows-code-signing-chain.pem`. It does not copy the
+trusted root into the signing chain and never accesses or exports the private
+key. Use `--force` only when intentionally replacing an existing output file.
+
 ## Automated private signing command
 
 The repository includes a private-operator script that performs all of the
