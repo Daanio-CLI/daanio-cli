@@ -273,7 +273,9 @@ if [ "$download_mode" = "tar" ]; then
 elif [ "$download_mode" = "bin" ]; then
   mv "$tmpdir/daanio.download" "$dest_version_dir/$bin_name"
 else
-  info "No prebuilt asset found for $ARTIFACT in $VERSION; building from source..."
+  [ "${DAANIO_BUILD_FROM_SOURCE:-}" = "1" ] \
+    || err "No prebuilt $ARTIFACT asset was found in $VERSION. The release may still be building; try again shortly. To explicitly compile from source, set DAANIO_BUILD_FROM_SOURCE=1."
+  info "No prebuilt asset found for $ARTIFACT in $VERSION; DAANIO_BUILD_FROM_SOURCE=1 was requested"
   command -v git >/dev/null 2>&1 || err "git is required to build from source"
   command -v cargo >/dev/null 2>&1 || err "cargo is required to build from source"
 

@@ -409,6 +409,10 @@ jobs:
 
   build-freebsd:
     name: Build (x86_64-unknown-freebsd)
+    # FreeBSD is an opt-in release target because the QEMU build can take
+    # several hours. When enabled, the finalizer waits for it and includes it
+    # in the checksum manifest; otherwise it is skipped immediately.
+    if: ${{ vars.ENABLE_FREEBSD_RELEASE == 'true' }}
     runs-on: ubuntu-latest
     needs: create-release
     # GitHub has no native FreeBSD runners, so build inside a FreeBSD VM
@@ -501,16 +505,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # macOS and Linux are the required public release set. Windows is
+          # published only when signing is configured, and FreeBSD is opt-in.
+          # Any optional assets that completed are still attached and included
+          # in SHA256SUMS by the later steps.
           expected=(
             artifacts/daanio-linux-x86_64/daanio-linux-x86_64.tar.gz
             artifacts/daanio-linux-aarch64/daanio-linux-aarch64.tar.gz
             artifacts/daanio-macos-aarch64/daanio-macos-aarch64.tar.gz
             artifacts/daanio-macos-x86_64/daanio-macos-x86_64.tar.gz
-            artifacts/daanio-windows-x86_64/daanio-windows-x86_64.exe
-            artifacts/daanio-windows-x86_64/daanio-windows-x86_64.tar.gz
-            artifacts/daanio-windows-aarch64/daanio-windows-aarch64.exe
-            artifacts/daanio-windows-aarch64/daanio-windows-aarch64.tar.gz
-            artifacts/daanio-freebsd-x86_64/daanio-freebsd-x86_64.tar.gz
           )
 
           missing=()
