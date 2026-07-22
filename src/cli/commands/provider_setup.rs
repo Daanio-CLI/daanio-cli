@@ -1,7 +1,5 @@
 use anyhow::{Context, Result};
-use serde::Serialize;
 use std::io::Read;
-use std::path::PathBuf;
 
 use crate::cli::args::ProviderAuthArg;
 use crate::config::{
@@ -29,64 +27,11 @@ pub(crate) struct ProviderAddOptions {
     pub overwrite: bool,
     pub provider_routing: bool,
     pub model_catalog: bool,
-    pub json: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 pub(crate) struct ProviderSetupReport {
-    status: &'static str,
     profile: String,
-    config_path: String,
-    api_base: String,
-    model: String,
-    api_key_env: Option<String>,
-    env_file: Option<String>,
-    env_file_path: Option<String>,
-    api_key_stored: bool,
-    auth: String,
-    default_set: bool,
-    run_command: String,
-    auth_test_command: String,
-}
-
-pub(crate) fn run_provider_add_command(options: ProviderAddOptions) -> Result<()> {
-    let emit_json = options.json;
-    let report = configure_provider_profile(options)?;
-
-    if emit_json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!("Added provider profile '{}'", report.profile);
-        println!("  config: {}", report.config_path);
-        println!("  base:   {}", report.api_base);
-        println!("  model:  {}", report.model);
-        println!("  auth:   {}", report.auth);
-        if let Some(env_file_path) = &report.env_file_path {
-            if report.api_key_stored {
-                println!(
-                    "  key:    {} in {}",
-                    report.api_key_env.as_deref().unwrap_or("API key"),
-                    env_file_path
-                );
-            } else {
-                println!(
-                    "  key:    {} (also reads {})",
-                    report.api_key_env.as_deref().unwrap_or("API key"),
-                    env_file_path
-                );
-            }
-        } else if let Some(api_key_env) = &report.api_key_env {
-            println!("  key:    environment variable {}", api_key_env);
-        }
-        if report.default_set {
-            println!("  default: yes");
-        }
-        println!();
-        println!("Run:       {}", report.run_command);
-        println!("Validate:  {}", report.auth_test_command);
-    }
-
-    Ok(())
 }
 
 pub(crate) fn configure_provider_profile(
@@ -151,8 +96,6 @@ pub(crate) fn configure_provider_profile(
     ) {
         save_env_value_to_env_file(env_key, file_name, Some(key))?;
     }
-    let api_key_stored = api_key.is_some() && env_file.is_some();
-
     let profile = NamedProviderConfig {
         provider_type: NamedProviderType::OpenAiCompatible,
         base_url: api_base.clone(),
@@ -221,35 +164,7 @@ pub(crate) fn configure_provider_profile(
     }
     std::fs::write(&config_path, updated)?;
 
-    let env_file_path = env_file
-        .as_deref()
-        .map(|file| crate::storage::app_config_dir().map(|dir| dir.join(file)))
-        .transpose()?
-        .map(path_to_string);
-
-    Ok(ProviderSetupReport {
-        status: "ok",
-        profile: name.clone(),
-        config_path: path_to_string(config_path),
-        api_base,
-        model: model.clone(),
-        api_key_env,
-        env_file,
-        env_file_path,
-        api_key_stored,
-        auth: auth_label(&auth).to_string(),
-        default_set: options.set_default,
-        run_command: format!(
-            "daanio --provider-profile {} --model {} run 'hello'",
-            shell_quote(&name),
-            shell_quote(&model)
-        ),
-        auth_test_command: format!(
-            "daanio --provider-profile {} auth-test --prompt {}",
-            shell_quote(&name),
-            shell_quote("Reply exactly DAANIO_PROVIDER_SETUP_OK")
-        ),
-    })
+    Ok(ProviderSetupReport { profile: name })
 }
 
 fn parse_config_or_default(content: &str) -> Result<Config> {
@@ -589,21 +504,6 @@ fn toml_quote(value: &str) -> String {
     })
 }
 
-fn shell_quote(value: &str) -> String {
-    if value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':'))
-    {
-        value.to_string()
-    } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
-    }
-}
-
-fn path_to_string(path: PathBuf) -> String {
-    path.display().to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -655,7 +555,6 @@ mod tests {
             overwrite: false,
             provider_routing: false,
             model_catalog: false,
-            json: false,
         }
     }
 
