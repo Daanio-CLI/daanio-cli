@@ -1,0 +1,19 @@
+{
+  "version": "0.1.0-daanio.1",
+  "date": "2026-07-22",
+  "title": "First Daanio CLI preview",
+  "highlights": [
+    "Sign in securely through the Daanio browser device flow without manually copying an API key",
+    "Use only the first-party Daanio gateway and dynamically load the authenticated account's available chat models",
+    "Install prebuilt binaries on Apple Silicon and Intel macOS, plus x86_64 and ARM64 Linux"
+  ],
+  "improvements": [
+    "Added public shell and PowerShell installers with SHA-256 verification and versioned release metadata",
+    "Filtered image and non-chat models from the terminal model picker",
+    "Preserved the original jcode history, MIT license, and credit to Jeremy Huang and the jcode contributors"
+  ],
+  "fixes": [
+    "Release publication now requires the core macOS and Linux assets without being blocked by optional unsigned Windows or FreeBSD targets",
+    "The shell installer no longer starts a long source compilation unless DAANIO_BUILD_FROM_SOURCE=1 is explicitly requested"
+  ]
+}
