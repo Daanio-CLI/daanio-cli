@@ -1,6 +1,6 @@
 [package]
 name = "daanio"
-version = "0.1.0"
+version = "0.2.0"
 description = "Daanio CLI — a fast, multi-provider coding agent for the terminal"
 edition = "2024"
 autobins = false

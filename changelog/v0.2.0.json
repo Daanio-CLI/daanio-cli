@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "date": "2026-07-24",
+  "title": "Guided Daanio onboarding and model inheritance",
+  "highlights": [
+    "Choose secure Daanio browser login or manual first-party API-key login during onboarding",
+    "Select from the authenticated account's live Daanio model catalog immediately after login",
+    "Agents inherit the currently selected main model unless the user explicitly chooses another model"
+  ],
+  "improvements": [
+    "Adds browser and API-key login method flags for scripted or repeatable account setup",
+    "Improves onboarding prompts, colors, validation messages, and recovery after a failed login",
+    "Keeps production models API-driven with no hardcoded model catalog or image models"
+  ],
+  "fixes": [
+    "Switching models now interrupts the active turn so subsequent agent work uses the newly selected model",
+    "Manual keys are validated against the Daanio account API before they are saved",
+    "Public macOS, Linux, and Windows installers remain available from clean repository checkouts"
+  ]
+}
