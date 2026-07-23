@@ -607,6 +607,42 @@ fn resolve_swarm_spawn_model_auth_route_prefixes_pin_expected_routes() {
 }
 
 #[test]
+fn resolve_swarm_spawn_model_daanio_subscription_always_inherits_coordinator() {
+    let selection = resolve_swarm_spawn_selection(
+        Some("daanio-subscription:gpt-5.6-sol".to_string()),
+        Some("some-stale-config-model".to_string()),
+        &coordinator_identity(
+            Some("claude-fable-5"),
+            Some("daanio"),
+            Some("daanio-subscription"),
+        ),
+    );
+
+    assert_eq!(selection.model.as_deref(), Some("claude-fable-5"));
+    assert_eq!(selection.provider_key.as_deref(), Some("daanio"));
+    assert_eq!(
+        selection.route_api_method.as_deref(),
+        Some("daanio-subscription")
+    );
+}
+
+#[test]
+fn resolve_swarm_spawn_model_daanio_prefix_is_normalized_without_coordinator_identity() {
+    let selection = resolve_swarm_spawn_selection(
+        Some("daanio-subscription:claude-fable-5".to_string()),
+        None,
+        &CoordinatorSpawnIdentity::default(),
+    );
+
+    assert_eq!(selection.model.as_deref(), Some("claude-fable-5"));
+    assert_eq!(selection.provider_key.as_deref(), Some("daanio"));
+    assert_eq!(
+        selection.route_api_method.as_deref(),
+        Some("daanio-subscription")
+    );
+}
+
+#[test]
 fn resolve_swarm_spawn_model_inherit_sentinel_uses_coordinator_model() {
     for sentinel in ["inherit", "INHERIT", "coordinator", " inherit ", ""] {
         let selection = resolve_swarm_spawn_selection(

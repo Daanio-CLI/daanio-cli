@@ -101,12 +101,14 @@ pub(super) async fn create_headless_session(
             provider_key_override.as_deref(),
             route_api_method_override.as_deref(),
         );
-        if let Err(e) = new_agent.set_model(&model_request) {
-            crate::logging::warn(&format!(
-                "Failed to set headless session model override '{}' (request '{}'): {}",
-                model, model_request, e
-            ));
-        }
+        new_agent.set_model(&model_request).map_err(|error| {
+            anyhow::anyhow!(
+                "Failed to create headless session with model override '{}' (request '{}'): {}",
+                model,
+                model_request,
+                error
+            )
+        })?;
     }
 
     if let Some(effort) = effort_override

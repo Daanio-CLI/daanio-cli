@@ -278,7 +278,8 @@ async fn resolve_coordinator_spawn_identity(
 }
 
 /// Split a configured swarm model that carries an explicit auth-route prefix
-/// (`openai-api:`, `openai-oauth:`, `claude-api:`, `claude-oauth:`) into a
+/// (`daanio-subscription:`, `openai-api:`, `openai-oauth:`, `claude-api:`,
+/// `claude-oauth:`) into a
 /// structured selection so spawned sessions pin the exact provider + auth
 /// method instead of guessing from the bare model name.
 ///
@@ -288,10 +289,21 @@ async fn resolve_coordinator_spawn_identity(
 /// GPT-5.5 on the OpenAI API key route regardless of the coordinator's model.
 ///
 /// Returns `None` for models without such a prefix, or for prefixes that carry
-/// no API-vs-OAuth decision (bare provider aliases, OpenRouter, Copilot, ...).
+/// no concrete runtime decision (bare provider aliases, OpenRouter, Copilot, ...).
 /// Those keep their prefixed model and route correctly via the existing
 /// session-restore path.
 fn explicit_route_for_configured_model(model: &str) -> Option<SwarmSpawnSelection> {
+    if let Some((prefix, bare)) = model.split_once(':')
+        && prefix.trim().eq_ignore_ascii_case("daanio-subscription")
+        && !bare.trim().is_empty()
+    {
+        return Some(SwarmSpawnSelection {
+            model: Some(bare.trim().to_string()),
+            provider_key: Some("daanio".to_string()),
+            route_api_method: Some("daanio-subscription".to_string()),
+        });
+    }
+
     let (_, prefix, bare) = crate::provider::explicit_model_provider_prefix(model)?;
     let bare = bare.trim();
     if bare.is_empty() {
@@ -326,6 +338,17 @@ fn inherit_coordinator_selection(coordinator: &CoordinatorSpawnIdentity) -> Swar
             .or_else(|| provider_key_for_spawn_model(coordinator.model.as_deref(), None)),
         route_api_method: coordinator.route_api_method.clone(),
     }
+}
+
+fn coordinator_uses_daanio_subscription(coordinator: &CoordinatorSpawnIdentity) -> bool {
+    coordinator
+        .route_api_method
+        .as_deref()
+        .is_some_and(|route| route.eq_ignore_ascii_case("daanio-subscription"))
+        || coordinator.provider_key.as_deref().is_some_and(|provider| {
+            provider.eq_ignore_ascii_case("daanio")
+                || provider.eq_ignore_ascii_case("daanio-subscription")
+        })
 }
 
 /// Selection for a concrete model string (optionally route-prefixed like
@@ -368,6 +391,13 @@ fn resolve_swarm_spawn_selection(
     configured_swarm_model: Option<String>,
     coordinator: &CoordinatorSpawnIdentity,
 ) -> SwarmSpawnSelection {
+    // A Daanio subscription worker must use the coordinator's selected model.
+    // Do not let an LLM-provided per-spawn model or a stale local config pin
+    // silently move child work to a different subscription model.
+    if coordinator.model.is_some() && coordinator_uses_daanio_subscription(coordinator) {
+        return inherit_coordinator_selection(coordinator);
+    }
+
     // A per-spawn requested model (the `model` param on `swarm spawn`) takes
     // precedence over the `agents.swarm_model` config pin. An explicit
     // `inherit`/`coordinator` request forces coordinator inheritance even when
