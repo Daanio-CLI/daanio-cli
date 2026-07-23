@@ -28,6 +28,14 @@ pub(crate) enum GoogleAccessTierArg {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum DaanioLoginMethodArg {
+    /// OAuth 2.0 device authorization through daanio.com (recommended).
+    Browser,
+    /// Securely enter an API key issued by the Daanio gateway.
+    ApiKey,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum ProviderAuthArg {
     /// Send the API key as Authorization: Bearer <key> (OpenAI-compatible default)
     Bearer,
@@ -205,6 +213,10 @@ pub(crate) enum Command {
         /// Do not open a browser automatically; print the approval URL instead.
         #[arg(long, alias = "headless")]
         no_browser: bool,
+
+        /// Daanio authentication method. If omitted in a terminal, you can choose interactively.
+        #[arg(long, value_enum)]
+        method: Option<DaanioLoginMethodArg>,
 
         /// Print a script-friendly auth URL and persist temporary login state for later completion.
         #[arg(long, conflicts_with_all = ["callback_url", "auth_code"], hide = true)]
@@ -558,11 +570,14 @@ pub(crate) enum Command {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum AccountCommand {
-    /// Open secure browser-based Daanio device authorization
+    /// Sign in with browser approval or a first-party Daanio API key
     Login {
         /// Do not open a browser automatically; print the public approval URL instead
         #[arg(long, alias = "headless")]
         no_browser: bool,
+        /// Daanio authentication method. If omitted in a terminal, you can choose interactively.
+        #[arg(long, value_enum)]
+        method: Option<DaanioLoginMethodArg>,
     },
     /// Show canonical account, plan, and usage status from /v1/me
     Status {

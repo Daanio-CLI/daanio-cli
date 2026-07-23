@@ -3064,7 +3064,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         // Capture state snapshot
         capture.state.is_processing = app.is_processing();
         capture.state.input_len = app.input().len();
-        capture.state.input_preview = app.input().chars().take(100).collect();
+        capture.state.input_preview = super::ui_secret_input::debug_preview(app);
         capture.state.cursor_pos = app.cursor_pos();
         capture.state.scroll_offset = app.scroll_offset();
         capture.state.queued_count = pending_count;

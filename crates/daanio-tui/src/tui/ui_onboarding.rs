@@ -133,6 +133,22 @@ fn yes_no_pill_line(yes_highlighted: bool, align: Alignment) -> Line<'static> {
     Line::from(spans).alignment(align)
 }
 
+/// Daanio's two supported first-party login methods. Browser approval is the
+/// recommended/default choice; manual entry accepts only a Daanio gateway key.
+fn daanio_login_method_pill_line(browser_highlighted: bool, align: Alignment) -> Line<'static> {
+    let mut spans = Vec::new();
+    spans.extend(lozenge_pill_spans(
+        "Browser sign-in (recommended)",
+        browser_highlighted,
+    ));
+    spans.push(Span::raw("   "));
+    spans.extend(lozenge_pill_spans(
+        "Enter Daanio API key",
+        !browser_highlighted,
+    ));
+    Line::from(spans).alignment(align)
+}
+
 /// A rounded "Continue" pill button. Rendered above the import list so the user
 /// can reach the commit action just by arrowing up out of the rows (no need to
 /// read a "Press Enter" instruction). Uses the same lozenge style as the Yes/No
@@ -489,7 +505,7 @@ fn welcome_body_lines(app: &dyn TuiState) -> Vec<Line<'static>> {
         OnboardingWelcomeKind::LoginOpenAi { yes_highlighted } => {
             lines.push(
                 Line::from(Span::styled(
-                    "Sign in to Daanio?",
+                    "Choose how to sign in to Daanio",
                     Style::default()
                         .fg(welcome_accent())
                         .add_modifier(Modifier::BOLD),
@@ -498,12 +514,52 @@ fn welcome_body_lines(app: &dyn TuiState) -> Vec<Line<'static>> {
             );
             lines.push(Line::from(""));
 
-            // Rounded Yes/No lozenge pills; the selection is shown visually (the
-            // filled capsule), so no instruction sentence is needed.
-            lines.push(yes_no_pill_line(yes_highlighted, align));
-            // The Esc hint below already says you can log in later with /login,
-            // so we don't repeat a "choose No to skip" line here.
+            lines.push(
+                Line::from(Span::styled(
+                    "Both methods use only your Daanio gateway account.",
+                    Style::default().fg(dim_color()),
+                ))
+                .alignment(align),
+            );
+            lines.push(Line::from(""));
+            lines.push(daanio_login_method_pill_line(yes_highlighted, align));
+            lines.push(
+                Line::from(Span::styled(
+                    "Use arrows to choose, then press Enter.",
+                    Style::default().fg(dim_color()),
+                ))
+                .alignment(align),
+            );
             push_esc_skip_hint(&mut lines, align);
+            return lines;
+        }
+        OnboardingWelcomeKind::ModelSelect => {
+            lines.push(
+                Line::from(Span::styled(
+                    "Choose your model",
+                    Style::default()
+                        .fg(welcome_accent())
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .alignment(align),
+            );
+            lines.push(Line::from(""));
+            lines.push(
+                Line::from(Span::styled(
+                    "Your main session and new agents will use this choice.",
+                    Style::default().fg(rgb(200, 200, 200)),
+                ))
+                .alignment(align),
+            );
+            lines.push(
+                Line::from(vec![
+                    Span::styled("Enter", Style::default().fg(welcome_accent()).bold()),
+                    Span::styled(" opens models  ·  ", Style::default().fg(dim_color())),
+                    Span::styled("/model", Style::default().fg(welcome_accent()).bold()),
+                    Span::styled(" changes it later", Style::default().fg(dim_color())),
+                ])
+                .alignment(align),
+            );
             return lines;
         }
         OnboardingWelcomeKind::ContinuePrompt {

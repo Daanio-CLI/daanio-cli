@@ -103,6 +103,75 @@ fn persist_approved_key(approved: &ApprovedAccountKey) -> Result<()> {
     Ok(())
 }
 
+/// Manual first-party credential login. The secret is read without terminal
+/// echo, checked against Daanio `/v1/me`, and only then written to disk. This
+/// prevents upstream-provider API keys from being accepted by mistake.
+pub(super) async fn login_daanio_api_key_flow() -> Result<LoginCompletion> {
+    eprintln!("\n{}", crate::cli::output::heading("Daanio API Key Login"));
+    eprintln!(
+        "  {}",
+        crate::cli::output::muted(
+            "Only a Daanio gateway API key issued by daanio.com is accepted."
+        )
+    );
+    eprint!("  Paste Daanio API key (input hidden): ");
+    use std::io::Write as _;
+    std::io::stderr().flush()?;
+    let api_key = super::read_secret_line()?;
+    if api_key.len() < 8 {
+        anyhow::bail!("No valid Daanio API key was provided. Nothing was saved.");
+    }
+
+    eprintln!(
+        "  {}",
+        crate::cli::output::muted("Validating with Daanio /v1/me…")
+    );
+    let client = crate::provider::shared_http_client();
+    let api_base = subscription_api::configured_api_base();
+    let me = match subscription_api::fetch_subscription_me_with(&client, &api_base, &api_key).await
+    {
+        Ok(me) => me,
+        Err(AccountApiError::Unauthorized) => anyhow::bail!(
+            "That credential was not accepted by Daanio. Only a Daanio gateway API key issued by daanio.com can be used; nothing was saved."
+        ),
+        Err(error) => {
+            anyhow::bail!("Daanio could not validate that API key: {error}. Nothing was saved.")
+        }
+    };
+
+    crate::subscription_catalog::persist_account_credentials(
+        &api_key,
+        Some(&me.account_id),
+        Some(&me.email),
+        Some(&me.tier),
+    )?;
+    crate::auth::AuthStatus::invalidate_cache();
+
+    let tier = me
+        .parsed_tier()
+        .map(|tier| tier.display_name().to_string())
+        .unwrap_or_else(|| me.tier.clone());
+    eprintln!(
+        "  {}",
+        crate::cli::output::success(format!("✓ Daanio API key validated for {}", me.email))
+    );
+    eprintln!(
+        "  {}",
+        crate::cli::output::muted("Credential saved securely (owner-only)")
+    );
+    if !tier.trim().is_empty() && !tier.eq_ignore_ascii_case("none") {
+        eprintln!("  Plan: {tier} · status {}", me.status);
+    }
+    crate::telemetry::record_auth_success("daanio-subscription", "api_key");
+
+    if me.has_active_paid_plan() {
+        Ok(LoginCompletion::Active)
+    } else {
+        print_recovery_actions();
+        Ok(LoginCompletion::KeySavedPlanPending)
+    }
+}
+
 /// Full browser-first device login. No email or secret is requested in the
 /// terminal. The exchanged Daanio credential is saved after one-time approval,
 /// regardless of whether account-plan metadata is immediately available.
@@ -118,12 +187,18 @@ pub(super) async fn login_daanio_device_flow(no_browser: bool) -> Result<LoginCo
     .map_err(anyhow::Error::new)
     .context("Failed to start Daanio account login")?;
 
-    eprintln!("\nDaanio Account Login");
-    eprintln!("  Opening the secure account approval page:");
-    eprintln!("  {}", device.verification_uri_complete);
-    eprintln!("\n  Approve the request in that browser. No terminal email entry is needed.");
+    eprintln!("\n{}", crate::cli::output::heading("Daanio Account Login"));
+    eprintln!("  {}", crate::cli::output::muted("Secure browser approval"));
+    eprintln!(
+        "  {}",
+        crate::cli::output::link(&device.verification_uri_complete)
+    );
+    eprintln!("\n  Approve the request in your browser—no terminal email is needed.");
     super::maybe_open_browser(&device.verification_uri_complete, no_browser);
-    eprintln!("  Waiting for browser approval. Press Ctrl-C to cancel...");
+    eprintln!(
+        "  {}",
+        crate::cli::output::muted("Waiting for approval · Ctrl-C to cancel")
+    );
 
     let approved = match poll_for_api_key(
         &client,
@@ -144,11 +219,17 @@ pub(super) async fn login_daanio_device_flow(no_browser: bool) -> Result<LoginCo
 
     persist_approved_key(&approved)?;
     if approved.email.trim().is_empty() {
-        eprintln!("\n  Account approved.");
+        eprintln!("\n  {}", crate::cli::output::success("✓ Account approved"));
     } else {
-        eprintln!("\n  Account approved for {}.", approved.email);
+        eprintln!(
+            "\n  {}",
+            crate::cli::output::success(format!("✓ Account approved for {}", approved.email))
+        );
     }
-    eprintln!("  Credential saved securely with owner-only permissions.");
+    eprintln!(
+        "  {}",
+        crate::cli::output::muted("Credential saved securely (owner-only)")
+    );
     let completion = match subscription_api::fetch_subscription_me_with(
         &client,
         &api_base,
@@ -168,9 +249,15 @@ pub(super) async fn login_daanio_device_flow(no_browser: bool) -> Result<LoginCo
                 .map(|tier| tier.display_name().to_string())
                 .unwrap_or_else(|| me.tier.clone());
             if tier.trim().is_empty() || tier.eq_ignore_ascii_case("none") {
-                eprintln!("  ✓ Signed in to Daanio (status: {}).", me.status);
+                eprintln!(
+                    "  {}",
+                    crate::cli::output::success(format!("✓ Signed in · status {}", me.status))
+                );
             } else {
-                eprintln!("  ✓ Signed in to Daanio ({tier}, status: {}).", me.status);
+                eprintln!(
+                    "  {}",
+                    crate::cli::output::success(format!("✓ Signed in · {tier} · {}", me.status))
+                );
             }
             if me.has_active_paid_plan() {
                 LoginCompletion::Active
@@ -198,9 +285,19 @@ pub(super) async fn login_daanio_device_flow(no_browser: bool) -> Result<LoginCo
 }
 
 fn print_recovery_actions() {
-    eprintln!("  Check:   daanio account status");
-    eprintln!("  Manage:  daanio account manage");
-    eprintln!("  Log out: daanio account logout");
+    eprintln!("\n  {}", crate::cli::output::muted("Account commands"));
+    eprintln!(
+        "    {}",
+        crate::cli::output::command("daanio account status")
+    );
+    eprintln!(
+        "    {}",
+        crate::cli::output::command("daanio account manage")
+    );
+    eprintln!(
+        "    {}",
+        crate::cli::output::command("daanio account logout")
+    );
 }
 
 #[cfg(test)]

@@ -1,5 +1,9 @@
 #[derive(Debug, Clone)]
 pub(crate) enum PendingLogin {
+    /// Waiting for a first-party Daanio gateway API key. The key is validated
+    /// against Daanio `/v1/me` before it is persisted; upstream-provider keys
+    /// are therefore never accepted by this path.
+    DaanioApiKey,
     /// Waiting for user to paste Claude OAuth code for a specific stored account
     ClaudeAccount {
         verifier: String,
@@ -63,6 +67,7 @@ pub(crate) enum PendingLogin {
 impl PendingLogin {
     pub(crate) fn telemetry_context(&self) -> Option<(String, String)> {
         match self {
+            Self::DaanioApiKey => Some(("daanio".to_string(), "api_key".to_string())),
             Self::ClaudeAccount { .. } => Some(("claude".to_string(), "oauth".to_string())),
             Self::OpenAiAccount { .. } => Some(("openai".to_string(), "oauth".to_string())),
             Self::Gemini { .. } => Some(("gemini".to_string(), "oauth".to_string())),

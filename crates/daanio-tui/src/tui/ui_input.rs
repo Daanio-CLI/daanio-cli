@@ -2446,8 +2446,8 @@ pub(super) fn draw_input(
     next_prompt: usize,
     debug_capture: &mut Option<FrameCaptureBuilder>,
 ) -> Option<Position> {
-    let input_text = app.input();
-    let cursor_pos = app.cursor_pos();
+    let (visible_input, cursor_pos) = crate::tui::ui_secret_input::visible_input(app);
+    let input_text = visible_input.as_ref();
 
     let mode = composer_mode(input_text, app.is_remote_mode());
     // Command suggestions render later as an overlay pass

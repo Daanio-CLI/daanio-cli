@@ -2,8 +2,11 @@ use anyhow::{Context, Result};
 
 use crate::subscription_api::{self, AccountApiError};
 
-pub(crate) async fn run_login(no_browser: bool) -> Result<()> {
-    super::login::run_daanio_account_login(no_browser).await
+pub(crate) async fn run_login(
+    no_browser: bool,
+    method: Option<super::args::DaanioLoginMethodArg>,
+) -> Result<()> {
+    super::login::run_daanio_account_login(no_browser, method).await
 }
 
 pub(crate) async fn run_status(json: bool) -> Result<()> {

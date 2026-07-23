@@ -43,8 +43,8 @@ fn onboarding_sim_highlight_toggles_without_real_action() {
     let mut app = create_test_app();
     app.start_onboarding_simulator();
 
-    // On the LoginOpenAi screen, 'l' previews the "No" highlight and 'h' the
-    // "Yes" highlight. Neither triggers a real login (no overlay opens).
+    // On the login-method screen, 'l' previews manual key entry and 'h'
+    // previews browser approval. Neither triggers a real login.
     app.handle_key(KeyCode::Char('l'), KeyModifiers::NONE)
         .unwrap();
     assert!(matches!(

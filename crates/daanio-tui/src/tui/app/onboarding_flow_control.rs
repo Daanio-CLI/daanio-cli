@@ -104,7 +104,7 @@ impl App {
             self.onboarding_startup_checked = true;
             return;
         }
-        if !self.is_new_user_for_onboarding() {
+        if !self.is_new_user_for_onboarding() && !Self::needs_saved_model_setup() {
             self.onboarding_startup_checked = true;
             return;
         }
@@ -187,17 +187,14 @@ impl App {
         }
     }
 
-    /// Begin the guided post-login flow. Called once auth becomes available on a
-    /// fresh install (login/import completes). New users are not forced through a
-    /// model picker; the default route is used and `/model` remains available.
-    ///
+    /// Begin post-login onboarding and open model selection.
     /// No-op if a flow is already running or the user is experienced.
     pub(super) fn begin_onboarding_flow(&mut self) {
         if self.onboarding_flow.is_some() {
             return;
         }
         self.onboarding_flow = Some(OnboardingFlow::begin());
-        self.onboarding_after_model_select();
+        self.open_onboarding_model_picker();
     }
 
     /// Begin the guided flow at the in-TUI `Login` phase. Used on a fresh
@@ -238,7 +235,9 @@ impl App {
                 "Welcome to daanio: review detected logins (arrows/hl to move, Enter to choose)",
             );
         } else {
-            self.set_status_notice("Sign in to Daanio? Yes/No - hl to move, Enter to choose");
+            self.set_status_notice(
+                "Daanio login: [Browser recommended] / [Manual API key] - hl to choose",
+            );
         }
     }
 
@@ -247,6 +246,13 @@ impl App {
         crate::telemetry::record_setup_step_once("login_picker_opened");
         self.start_login_provider(crate::provider_catalog::DAANIO_LOGIN_PROVIDER);
         self.set_status_notice("Login: approve Daanio in your browser");
+    }
+
+    /// Start secure first-party Daanio API-key entry. The credential is masked
+    /// in the composer and validated by the account API before persistence.
+    pub(super) fn onboarding_start_manual_login(&mut self) {
+        crate::telemetry::record_setup_step_once("login_picker_opened");
+        self.start_daanio_api_key_login();
     }
 
     /// Advance out of a login phase once credentials are available. We no longer
@@ -270,7 +276,7 @@ impl App {
         if let Some(flow) = self.onboarding_flow.as_mut() {
             flow.phase = OnboardingPhase::ModelSelect;
         }
-        self.onboarding_after_model_select();
+        self.open_onboarding_model_picker();
     }
 
     /// Advance out of model selection into the simple first-run choice: run the
@@ -279,7 +285,8 @@ impl App {
         if !matches!(self.onboarding_phase(), Some(OnboardingPhase::ModelSelect)) {
             return;
         }
-        self.onboarding_open_start_choice();
+        self.save_onboarding_model_choice();
+        self.finish_onboarding_model_setup();
     }
 
     /// Enter the "Continue where you left off?" phase. Highlightable Yes/No
@@ -335,9 +342,9 @@ impl App {
     /// - `ModelSelect`: we tell the user to run /model; Enter is also a
     ///   shortcut that opens the model picker from the welcome screen.
     /// - `ContinuePrompt`: Y/Enter continues, N/Esc declines.
-    /// - `LoginOpenAi`: Left/h -> Yes, Right/l -> No, toggle with
-    ///   Up/Down/k/j/Tab; y/n commit directly, Enter/Space commit the
-    ///   highlighted default (Yes -> OpenAI sign-in, No -> finish onboarding).
+    /// - `LoginOpenAi`: Left/h -> browser, Right/l -> manual API key, toggle
+    ///   with Up/Down/k/j/Tab; b/o and a/m commit directly, Enter/Space commits
+    ///   the highlighted method.
     ///
     /// Returns true if the key was consumed.
     pub(super) fn handle_onboarding_continue_prompt_key(&mut self, code: KeyCode) -> bool {
@@ -391,10 +398,18 @@ impl App {
                 if import.is_none() {
                     return match code {
                         KeyCode::Enter if self.inline_interactive_state.is_none() => {
-                            // Clear the failure notice now that the user is acting
-                            // on it, so a later retry starts from a clean screen.
                             self.onboarding_import_error = None;
-                            self.show_interactive_login();
+                            if self.onboarding_import_failed_provider.as_deref() == Some("daanio") {
+                                self.onboarding_import_failed_provider = None;
+                                if let Some(flow) = self.onboarding_flow.as_mut() {
+                                    flow.phase = OnboardingPhase::LoginOpenAi {
+                                        yes_highlighted: true,
+                                    };
+                                }
+                                self.update_onboarding_login_openai_status();
+                            } else {
+                                self.show_interactive_login();
+                            }
                             true
                         }
                         // On the failure screen, H hands the fix to a coding
@@ -582,12 +597,12 @@ impl App {
         true
     }
 
-    /// Handle a key while the Daanio login prompt is up. Yes/No sit side
-    /// by side (default highlight is "Yes"):
-    ///   - Left / h  -> highlight "Yes"
-    ///   - Right / l -> highlight "No"
+    /// Handle a key while the Daanio login-method prompt is up. Browser/manual
+    /// sit side by side (browser is highlighted by default):
+    ///   - Left / h  -> highlight browser approval
+    ///   - Right / l -> highlight manual API key
     ///   - Up / Down / k / j / Tab -> toggle
-    ///   - y / Y -> add a Daanio key; n / N -> skip and finish onboarding
+    ///   - b / o -> browser; a / m -> manual API key
     ///   - Enter / Space -> commit the highlighted choice
     fn handle_onboarding_login_openai_key(&mut self, code: KeyCode) -> bool {
         let Some(flow) = self.onboarding_flow.as_mut() else {
@@ -616,55 +631,37 @@ impl App {
                 self.update_onboarding_login_openai_status();
                 true
             }
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+            KeyCode::Char('b') | KeyCode::Char('B') | KeyCode::Char('o') | KeyCode::Char('O') => {
                 self.onboarding_answer_login_openai(true);
                 true
             }
-            KeyCode::Char('n') | KeyCode::Char('N') => {
+            KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('m') | KeyCode::Char('M') => {
                 self.onboarding_answer_login_openai(false);
                 true
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
-                let wants_openai = *yes_highlighted;
-                self.onboarding_answer_login_openai(wants_openai);
+                let wants_browser = *yes_highlighted;
+                self.onboarding_answer_login_openai(wants_browser);
                 true
             }
             _ => false,
         }
     }
 
-    /// Answer the Daanio login prompt. Yes starts secure browser authorization;
-    /// No exits onboarding and drops the user on the normal new-session screen
-    /// with a system message telling them to run `/login` when they're ready.
-    ///
-    /// We intentionally do NOT open the inline provider picker on "No": that
-    /// flow has a flaky input widget (typed characters were not echoed), and
-    /// finishing onboarding straight to the usual screen is simpler and more
-    /// robust. The user can start Daanio browser sign-in via `/login` later.
-    pub(super) fn onboarding_answer_login_openai(&mut self, wants_openai: bool) {
+    /// Start the selected Daanio login method. Both successful paths publish a
+    /// normal `LoginCompleted` event, which advances onboarding into the live
+    /// API-backed model picker.
+    pub(super) fn onboarding_answer_login_openai(&mut self, wants_browser: bool) {
         if !matches!(
             self.onboarding_phase(),
             Some(OnboardingPhase::LoginOpenAi { .. })
         ) {
             return;
         }
-        if wants_openai {
+        if wants_browser {
             self.onboarding_start_default_login();
         } else {
-            self.onboarding_finish();
-            let login = Self::onboarding_login_suggestion();
-            let hint = if login == "/login" {
-                "No problem. When you're ready, run /login to sign in securely through \
-                 daanio.com. Upstream provider credentials are never requested."
-                    .to_string()
-            } else {
-                format!(
-                    "No problem. When you're ready, run {login} to start secure Daanio \
-                     browser sign-in."
-                )
-            };
-            self.push_display_message(DisplayMessage::system(hint));
-            self.set_status_notice(format!("Run {login} when you're ready"));
+            self.onboarding_start_manual_login();
         }
     }
 
@@ -676,9 +673,13 @@ impl App {
                 yes_highlighted: true
             })
         );
-        let choice = if yes { "Yes" } else { "No" };
+        let choice = if yes {
+            "Browser (recommended)"
+        } else {
+            "Manual Daanio API key"
+        };
         self.set_status_notice(format!(
-            "Sign in to Daanio? [{choice}] - hl to move, Enter to choose"
+            "Daanio login: [{choice}] - hl to move, Enter to choose"
         ));
     }
 
@@ -1424,15 +1425,13 @@ impl App {
     pub(super) fn onboarding_handle_login_failed(&mut self, reason: Option<String>) {
         let in_login_phase = matches!(
             self.onboarding_flow.as_ref().map(|f| &f.phase),
-            Some(OnboardingPhase::Login { .. })
+            Some(OnboardingPhase::Login { .. } | OnboardingPhase::LoginOpenAi { .. })
         );
         if !in_login_phase {
             return;
         }
-        if let Some(flow) = self.onboarding_flow.as_mut()
-            && let OnboardingPhase::Login { ref mut import } = flow.phase
-        {
-            *import = None;
+        if let Some(flow) = self.onboarding_flow.as_mut() {
+            flow.phase = OnboardingPhase::Login { import: None };
         }
         self.onboarding_import_in_progress = None;
         // Remember a short reason so the recovery screen can explain what went
@@ -1442,9 +1441,7 @@ impl App {
                 .map(|r| Self::summarize_import_error(&r))
                 .unwrap_or_else(|| "We couldn't import those logins.".to_string()),
         );
-        self.set_status_notice(
-            "Import failed. Press Enter to choose a provider and log in manually.",
-        );
+        self.set_status_notice("Login failed. Press Enter to choose a Daanio login method.");
     }
 
     /// Condense a (possibly multi-line markdown) import-failure message into a

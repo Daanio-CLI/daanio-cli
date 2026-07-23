@@ -36,6 +36,7 @@ include!("tests/scroll_copy_02/part_02.rs");
 include!("tests/scroll_copy_03.rs");
 include!("tests/input_copy_selection.rs");
 include!("tests/onboarding_flow.rs");
+include!("tests/onboarding_login_methods.rs");
 include!("tests/onboarding_golden.rs");
 include!("tests/onboarding_eval.rs");
 include!("tests/onboarding_sim.rs");
@@ -45,7 +46,6 @@ include!("tests/hotkey_feedback_e2e.rs");
 include!("tests/todo_card.rs");
 include!("tests/issue_496_input_routing.rs");
 include!("tests/issue_497_copy_ctrl_c.rs");
-
 #[test]
 fn kv_cache_signature_prefix_match_allows_appended_messages() {
     let baseline_messages = vec![

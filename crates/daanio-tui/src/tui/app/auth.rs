@@ -2,6 +2,8 @@
 mod auth_account_commands;
 #[path = "auth_account_picker.rs"]
 mod auth_account_picker;
+#[path = "auth_daanio_manual.rs"]
+mod auth_daanio_manual;
 #[path = "auth_types.rs"]
 mod auth_types;
 pub(crate) use self::auth_account_commands::{
@@ -10,11 +12,9 @@ pub(crate) use self::auth_account_commands::{
     save_openai_fast_setting_local,
 };
 pub(super) use self::auth_types::{AccountCommand, PendingAccountInput, PendingLogin};
-
 use super::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::Arc;
-
 impl App {
     fn open_auth_browser(url: &str) -> bool {
         // Honors --no-browser/NO_BROWSER/DAANIO_NO_BROWSER and never opens real
@@ -23,7 +23,6 @@ impl App {
         // developer's desktop).
         super::helpers::open_path_or_url_detached(url).is_ok()
     }
-
     fn record_oauth_preflight(
         provider_id: &str,
         browser_opened: bool,
@@ -65,14 +64,12 @@ impl App {
         }
         notices.join("\n")
     }
-
     pub(super) fn show_daanio_subscription_status(&mut self) {
         let configured_key = crate::subscription_catalog::configured_api_key().is_some();
         let configured_base = crate::subscription_catalog::configured_api_base()
             .unwrap_or_else(|| crate::subscription_catalog::DEFAULT_DAANIO_API_BASE.to_string());
         let runtime_mode = crate::subscription_catalog::is_runtime_mode_enabled();
         let cached_tier = crate::subscription_catalog::cached_tier();
-
         let mut message = String::from("Daanio Subscription Status\n\n");
         message.push_str(&format!(
             "  - Credentials: {}\n",
@@ -105,7 +102,6 @@ impl App {
                 "inactive for this session"
             }
         ));
-
         message.push_str("Catalog\n\n");
         for model in crate::subscription_catalog::curated_models() {
             let default_suffix = if model.default_enabled {
@@ -602,7 +598,7 @@ impl App {
         }
     }
 
-    fn begin_pending_login(&mut self, pending: PendingLogin) {
+    pub(super) fn begin_pending_login(&mut self, pending: PendingLogin) {
         if let Some((provider, method)) = pending.telemetry_context() {
             crate::telemetry::record_auth_started(&provider, &method);
         }
@@ -1963,7 +1959,10 @@ impl App {
             self.push_display_message(DisplayMessage::system("Login cancelled.".to_string()));
             return;
         }
-
+        if matches!(pending, PendingLogin::DaanioApiKey) {
+            self.submit_daanio_api_key(trimmed);
+            return;
+        }
         if trimmed.is_empty() {
             let help = match &pending {
                 PendingLogin::AutoImportSelection { .. } => {
@@ -1975,7 +1974,6 @@ impl App {
             self.pending_login = Some(pending);
             return;
         }
-
         match &pending {
             PendingLogin::OpenAiAccount { .. } if !looks_like_oauth_callback_input(trimmed) => {
                 self.push_display_message(DisplayMessage::system(
@@ -1995,6 +1993,7 @@ impl App {
         }
 
         match pending {
+            PendingLogin::DaanioApiKey => unreachable!("handled before generic login input"),
             PendingLogin::ClaudeAccount {
                 verifier,
                 label,
@@ -3201,6 +3200,7 @@ impl App {
             // (which explains next steps) instead of dumping a raw error message
             // and a status notice the user can miss.
             if self.onboarding_flow_active() {
+                self.onboarding_import_failed_provider = Some(login.provider.clone());
                 self.onboarding_handle_login_failed(Some(message));
             } else {
                 self.push_display_message(DisplayMessage::error(message));

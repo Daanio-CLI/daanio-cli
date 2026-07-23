@@ -1299,7 +1299,7 @@ impl App {
                     yes_highlighted: *yes_highlighted,
                 }
             }
-            Some(OnboardingPhase::ModelSelect) => OnboardingWelcomeKind::Suggestions,
+            Some(OnboardingPhase::ModelSelect) => OnboardingWelcomeKind::ModelSelect,
             Some(OnboardingPhase::ContinuePrompt {
                 cli,
                 yes_highlighted,

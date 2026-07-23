@@ -337,6 +337,7 @@ fn login_no_browser_flag_parses() {
             provider,
             account,
             no_browser,
+            method,
             print_auth_url,
             callback_url,
             auth_code,
@@ -351,6 +352,7 @@ fn login_no_browser_flag_parses() {
             assert!(provider.is_none());
             assert!(account.is_none());
             assert!(no_browser);
+            assert!(method.is_none());
             assert!(!print_auth_url);
             assert!(callback_url.is_none());
             assert!(auth_code.is_none());
@@ -383,6 +385,29 @@ fn login_accepts_provider_positional() {
     }
 
     assert!(Args::try_parse_from(["daanio", "login", "google"]).is_err());
+}
+
+#[test]
+fn login_accepts_explicit_daanio_login_methods() {
+    let browser = Args::try_parse_from(["daanio", "login", "daanio", "--method", "browser"])
+        .expect("browser login method");
+    assert!(matches!(
+        browser.command,
+        Some(Command::Login {
+            method: Some(DaanioLoginMethodArg::Browser),
+            ..
+        })
+    ));
+
+    let manual = Args::try_parse_from(["daanio", "login", "daanio", "--method", "api-key"])
+        .expect("manual key login method");
+    assert!(matches!(
+        manual.command,
+        Some(Command::Login {
+            method: Some(DaanioLoginMethodArg::ApiKey),
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -494,7 +519,22 @@ fn account_subcommands_parse() {
     assert!(matches!(
         login.command,
         Some(Command::Account {
-            action: AccountCommand::Login { no_browser: true }
+            action: AccountCommand::Login {
+                no_browser: true,
+                method: None
+            }
+        })
+    ));
+
+    let manual = Args::try_parse_from(["daanio", "account", "login", "--method", "api-key"])
+        .expect("manual account login");
+    assert!(matches!(
+        manual.command,
+        Some(Command::Account {
+            action: AccountCommand::Login {
+                no_browser: false,
+                method: Some(DaanioLoginMethodArg::ApiKey)
+            }
         })
     ));
 

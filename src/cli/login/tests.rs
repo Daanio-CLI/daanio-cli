@@ -1,5 +1,26 @@
 use super::*;
 
+#[test]
+fn daanio_login_method_parser_defaults_to_browser_and_accepts_manual_key() {
+    assert_eq!(
+        daanio_method::parse("").unwrap(),
+        crate::cli::args::DaanioLoginMethodArg::Browser
+    );
+    assert_eq!(
+        daanio_method::parse("oauth").unwrap(),
+        crate::cli::args::DaanioLoginMethodArg::Browser
+    );
+    assert_eq!(
+        daanio_method::parse("2").unwrap(),
+        crate::cli::args::DaanioLoginMethodArg::ApiKey
+    );
+    assert_eq!(
+        daanio_method::parse("manual").unwrap(),
+        crate::cli::args::DaanioLoginMethodArg::ApiKey
+    );
+    assert!(daanio_method::parse("openrouter").is_err());
+}
+
 fn set_or_clear_env(key: &str, value: Option<std::ffi::OsString>) {
     if let Some(value) = value {
         crate::env::set_var(key, value);

@@ -12,12 +12,15 @@ use crate::provider_catalog::{
 use super::provider_init::{ProviderChoice, login_provider_for_choice, save_named_api_key};
 
 mod daanio_device;
+mod daanio_method;
 mod scriptable;
+pub(crate) use daanio_method::run_account_login as run_daanio_account_login;
 use scriptable::*;
 
 #[derive(Debug, Clone, Default)]
 pub struct LoginOptions {
     pub no_browser: bool,
+    pub daanio_method: Option<super::args::DaanioLoginMethodArg>,
     pub print_auth_url: bool,
     pub callback_url: Option<String>,
     pub auth_code: Option<String>,
@@ -303,7 +306,7 @@ pub async fn run_login_provider(
                 Ok(LoginFlowOutcome::Completed)
             }
             LoginProviderTarget::Daanio => {
-                login_daanio_flow(options.no_browser)
+                daanio_method::login(daanio_method::resolve(&options)?, options.no_browser)
                     .await
                     .map(|completion| match completion {
                         daanio_device::LoginCompletion::CanceledBeforeApproval => {
@@ -522,15 +525,6 @@ async fn notify_running_server_auth_changed_best_effort(provider: Option<&str>) 
             );
         }
     }
-}
-
-async fn login_daanio_flow(no_browser: bool) -> Result<daanio_device::LoginCompletion> {
-    eprintln!("Starting secure Daanio browser sign-in...");
-    daanio_device::login_daanio_device_flow(no_browser).await
-}
-
-pub(crate) async fn run_daanio_account_login(no_browser: bool) -> Result<()> {
-    login_daanio_flow(no_browser).await.map(|_| ())
 }
 
 fn login_openai_api_key_flow() -> Result<()> {

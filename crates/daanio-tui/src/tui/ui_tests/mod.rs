@@ -114,6 +114,7 @@ fn native_scrollbar_visibility_requires_overflow() {
 struct TestState {
     input: String,
     cursor_pos: usize,
+    secret_input: bool,
     provider_name: Option<String>,
     provider_model: Option<String>,
     working_dir: Option<String>,
@@ -154,6 +155,24 @@ struct TestState {
     swarm_panel_full_page: bool,
 }
 
+#[test]
+fn secret_composer_masks_rendering_and_debug_preview() {
+    let app = TestState {
+        input: "daanio-secret-key".to_string(),
+        cursor_pos: 17,
+        secret_input: true,
+        ..Default::default()
+    };
+    let (visible, cursor) = crate::tui::ui_secret_input::visible_input(&app);
+    assert_eq!(visible, "*****************");
+    assert_eq!(cursor, 17);
+    assert_eq!(
+        crate::tui::ui_secret_input::debug_preview(&app),
+        "<secret input hidden>"
+    );
+    assert!(!visible.contains("secret"));
+}
+
 impl crate::tui::TuiState for TestState {
     fn display_messages(&self) -> &[DisplayMessage] {
         &self.display_messages
@@ -187,6 +206,9 @@ impl crate::tui::TuiState for TestState {
     }
     fn input(&self) -> &str {
         &self.input
+    }
+    fn input_is_secret(&self) -> bool {
+        self.secret_input
     }
     fn cursor_pos(&self) -> usize {
         self.cursor_pos

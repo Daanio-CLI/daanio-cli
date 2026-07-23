@@ -71,25 +71,22 @@ fn onboarding_golden_walks_every_phase() {
     let width = 80u16;
     let height = 30u16;
 
-    // 1. No detected imports: Daanio website-key Yes/No prompt.
+    // 1. No detected imports: first-party Daanio login-method prompt.
     {
         let app = app_in_phase(OnboardingPhase::LoginOpenAi {
             yes_highlighted: true,
         });
         let text = render_onboarding_text(&app, width, height);
         dump("LoginOpenAi (no imports)", &text);
-        // Lean prompt: just the question + the Yes/No lozenge pills. The Esc hint
-        // already covers the "skip / log in later" path, so no extra prose.
-        assert!(text.contains("Sign in to Daanio?"), "{text}");
-        assert!(text.contains("Yes") && text.contains("No"), "{text}");
+        assert!(text.contains("Choose how to sign in to Daanio"), "{text}");
         assert!(
-            text.contains("\u{25D6} Yes \u{25D7}") && text.contains("\u{25D6} No \u{25D7}"),
-            "yes/no lozenge pills: {text}"
+            text.contains("Browser sign-in (recommended)")
+                && text.contains("Enter Daanio API key"),
+            "login-method lozenge pills: {text}"
         );
-        // The redundant "Choose No to skip" line was removed.
         assert!(
-            !text.contains("Choose \"No\" to skip"),
-            "redundant skip line should be gone: {text}"
+            text.contains("Both methods use only your Daanio gateway account"),
+            "first-party boundary should be explicit: {text}"
         );
     }
 

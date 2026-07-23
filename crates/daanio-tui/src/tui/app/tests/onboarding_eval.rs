@@ -45,8 +45,6 @@ enum ScreenSurface {
     WelcomeBody,
     /// Rendered as the action-only onboarding picker overlay.
     PickerOverlay,
-    /// Transient/auto-advancing: never rests in front of the user.
-    Transient,
     /// Terminal: onboarding is over, the normal UI takes over.
     Terminal,
 }
@@ -58,8 +56,7 @@ fn classify_phase_surface(phase: &OnboardingPhase) -> ScreenSurface {
         OnboardingPhase::ContinuePrompt { .. } => ScreenSurface::WelcomeBody,
         OnboardingPhase::Suggestions => ScreenSurface::WelcomeBody,
         OnboardingPhase::StartChoice { .. } => ScreenSurface::PickerOverlay,
-        // ModelSelect immediately auto-advances; it never rests on screen.
-        OnboardingPhase::ModelSelect => ScreenSurface::Transient,
+        OnboardingPhase::ModelSelect => ScreenSurface::PickerOverlay,
         OnboardingPhase::Done => ScreenSurface::Terminal,
     }
 }
@@ -133,21 +130,23 @@ struct Path {
 fn entry_paths() -> Vec<Path> {
     vec![
         Path {
-            name: "Fresh install, no detected logins (accept OpenAI)",
+            name: "Fresh install, browser login",
             weight: 0.40,
             reaches_ready: true,
             steps: vec![
                 Step { phase: "LoginOpenAi", keystrokes: 1, is_decision: true, external_boundary: true },
+                Step { phase: "ModelSelect", keystrokes: 1, is_decision: true, external_boundary: false },
                 Step { phase: "StartChoice", keystrokes: 1, is_decision: true, external_boundary: false },
             ],
         },
         Path {
-            name: "Fresh install, decline login (defer to /login)",
+            name: "Fresh install, manual Daanio API-key login",
             weight: 0.10,
-            reaches_ready: false,
+            reaches_ready: true,
             steps: vec![
-                Step { phase: "LoginOpenAi", keystrokes: 1, is_decision: true, external_boundary: false },
-                Step { phase: "Done", keystrokes: 0, is_decision: false, external_boundary: false },
+                Step { phase: "LoginOpenAi", keystrokes: 2, is_decision: true, external_boundary: true },
+                Step { phase: "ModelSelect", keystrokes: 1, is_decision: true, external_boundary: false },
+                Step { phase: "StartChoice", keystrokes: 1, is_decision: true, external_boundary: false },
             ],
         },
         Path {
@@ -156,6 +155,7 @@ fn entry_paths() -> Vec<Path> {
             reaches_ready: true,
             steps: vec![
                 Step { phase: "Login{import}", keystrokes: 1, is_decision: true, external_boundary: false },
+                Step { phase: "ModelSelect", keystrokes: 1, is_decision: true, external_boundary: false },
                 Step { phase: "StartChoice", keystrokes: 1, is_decision: true, external_boundary: false },
             ],
         },
@@ -167,6 +167,7 @@ fn entry_paths() -> Vec<Path> {
                 // Single-screen checkbox list, all pre-checked: one Enter imports
                 // every detected login at once (no per-candidate page).
                 Step { phase: "Login{import}", keystrokes: 1, is_decision: true, external_boundary: false },
+                Step { phase: "ModelSelect", keystrokes: 1, is_decision: true, external_boundary: false },
                 Step { phase: "StartChoice", keystrokes: 1, is_decision: true, external_boundary: false },
             ],
         },
@@ -175,6 +176,7 @@ fn entry_paths() -> Vec<Path> {
             weight: 0.20,
             reaches_ready: true,
             steps: vec![
+                Step { phase: "ModelSelect", keystrokes: 1, is_decision: true, external_boundary: false },
                 Step { phase: "StartChoice", keystrokes: 1, is_decision: true, external_boundary: false },
             ],
         },
@@ -633,8 +635,8 @@ fn node_props(n: GraphNode) -> NodeProps {
         LoginImport => NodeProps { is_decision: true, has_default: true, is_ready: false, is_terminal: false },
         // Recovery fallback: a single Enter opens the provider picker.
         LoginRecovery => NodeProps { is_decision: true, has_default: false, is_ready: false, is_terminal: false },
-        // Transient: auto-advances, the user never chooses here.
-        ModelSelect => NodeProps { is_decision: false, has_default: true, is_ready: false, is_terminal: false },
+        // A model must be chosen from the live catalog; there is no hidden default.
+        ModelSelect => NodeProps { is_decision: true, has_default: false, is_ready: false, is_terminal: false },
         // Continue prompt auto-opens the resume menu on timeout (default Yes).
         ContinuePrompt => NodeProps { is_decision: true, has_default: true, is_ready: false, is_terminal: false },
         // Choosing either action reaches a ready session.
@@ -663,17 +665,17 @@ fn flow_edges() -> Vec<Edge> {
         Edge { from: Start, to: LoginOpenAi, keystrokes: 0 },
         Edge { from: Start, to: LoginImport, keystrokes: 0 },
         Edge { from: Start, to: ModelSelect, keystrokes: 0 },
-        // OpenAI sign-in: Yes -> (browser OAuth) -> Suggestions; No -> Done.
-        Edge { from: LoginOpenAi, to: StartChoice, keystrokes: 1 },
+        // Both Daanio login methods reach model setup after authentication. Esc
+        // remains the one-key onboarding escape hatch to Done.
+        Edge { from: LoginOpenAi, to: ModelSelect, keystrokes: 1 },
         Edge { from: LoginOpenAi, to: Done, keystrokes: 1 },
         // Import review: accept/decline each candidate, then suggestions. A
         // failed/declined import drops to the recovery fallback.
-        Edge { from: LoginImport, to: StartChoice, keystrokes: 1 },
+        Edge { from: LoginImport, to: ModelSelect, keystrokes: 1 },
         Edge { from: LoginImport, to: LoginRecovery, keystrokes: 1 },
         // Recovery: Enter opens the provider picker, ending at suggestions.
-        Edge { from: LoginRecovery, to: StartChoice, keystrokes: 1 },
-        // Transient model-select auto-advances with no keystroke.
-        Edge { from: ModelSelect, to: StartChoice, keystrokes: 0 },
+        Edge { from: LoginRecovery, to: ModelSelect, keystrokes: 1 },
+        Edge { from: ModelSelect, to: StartChoice, keystrokes: 1 },
         // The two actions either enter the normal blank-session suggestions or
         // finish onboarding while launching the suggested review.
         Edge { from: StartChoice, to: Suggestions, keystrokes: 1 },
@@ -1348,10 +1350,8 @@ struct Tier8Metrics {
 fn tier8_metrics() -> Tier8Metrics {
     use crossterm::event::KeyCode;
 
-    // ---- back_navigation + error_recovery_depth: decline OpenAI sign-in ----
-    // Declining ('n') finishes onboarding but the status notice / recovery
-    // points the user at /login, so the route is not a dead end. The recovery
-    // depth is the single keystroke to re-open login from the recovery phase.
+    // ---- back_navigation + error_recovery_depth: skip onboarding ----
+    // Esc finishes onboarding while preserving `/login` as the recovery path.
     let back_navigation_ok = {
         let mut app = create_test_app();
         app.onboarding_flow = None;
@@ -1359,7 +1359,7 @@ fn tier8_metrics() -> Tier8Metrics {
         if let Some(flow) = app.onboarding_flow.as_mut() {
             flow.phase = OnboardingPhase::LoginOpenAi { yes_highlighted: true };
         }
-        let consumed = app.handle_onboarding_continue_prompt_key(KeyCode::Char('n'));
+        let consumed = app.handle_onboarding_continue_prompt_key(KeyCode::Esc);
         // Onboarding reaches a terminal, and the recovery affordance (/login) is
         // documented on the last login screen the user saw.
         consumed && app.onboarding_phase().is_none()
@@ -1767,7 +1767,7 @@ fn is_unicode_dependence_char(c: char) -> bool {
     !GRACEFUL.contains(&c)
 }
 
-/// Render the LoginOpenAi Yes/No screen in both highlight states and confirm the
+/// Render the Daanio login-method screen in both highlight states and confirm the
 /// selected cell differs from the unselected cell by a NON-color video attribute
 /// (reverse/bold/underline), not just by foreground/background color.
 fn selection_uses_noncolor_attribute() -> bool {
@@ -1775,7 +1775,7 @@ fn selection_uses_noncolor_attribute() -> bool {
     use ratatui::backend::TestBackend;
     use ratatui::style::Modifier;
 
-    fn render_modifiers_on_yesno_row(yes_highlighted: bool) -> Option<(Modifier, Modifier)> {
+    fn render_login_method_modifiers(yes_highlighted: bool) -> Option<(Modifier, Modifier)> {
         let app = app_in_phase(OnboardingPhase::LoginOpenAi { yes_highlighted });
         let backend = TestBackend::new(80, 30);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1787,15 +1787,13 @@ fn selection_uses_noncolor_attribute() -> bool {
             .ok()?;
         let buf = terminal.backend().buffer().clone();
         for y in 0..30u16 {
-            // Build a per-cell symbol list so we can locate the "Yes"/"No"
+            // Build a per-cell symbol list so we can locate the browser/API
             // labels by COLUMN, not by byte offset (the lozenge pill caps ◖/◗
             // are multi-byte, so a string byte index would not map to a cell x).
             let cells: Vec<String> = (0..80u16).map(|x| buf[(x, y)].symbol().to_string()).collect();
             let line: String = cells.concat();
             let lt = line.to_ascii_lowercase();
-            if lt.contains("yes") && lt.contains("no") {
-                // Find the column where "Y","e","s" appear in consecutive cells,
-                // and likewise the first "N","o".
+            if lt.contains("browser sign-in") && lt.contains("enter daanio api key") {
                 let find_seq = |needle: &[&str]| -> Option<usize> {
                     (0..cells.len()).find(|&i| {
                         needle
@@ -1804,30 +1802,28 @@ fn selection_uses_noncolor_attribute() -> bool {
                             .all(|(k, ch)| cells.get(i + k).map(|c| c == ch).unwrap_or(false))
                     })
                 };
-                let mut yes_mod = Modifier::empty();
-                let mut no_mod = Modifier::empty();
-                if let Some(i) = find_seq(&["Y", "e", "s"]) {
-                    yes_mod = buf[(i as u16, y)].modifier;
+                let mut browser_mod = Modifier::empty();
+                let mut key_mod = Modifier::empty();
+                if let Some(i) = find_seq(&["B", "r", "o", "w", "s", "e", "r"]) {
+                    browser_mod = buf[(i as u16, y)].modifier;
                 }
-                if let Some(i) = find_seq(&["N", "o"]) {
-                    no_mod = buf[(i as u16, y)].modifier;
+                if let Some(i) = find_seq(&["E", "n", "t", "e", "r"]) {
+                    key_mod = buf[(i as u16, y)].modifier;
                 }
-                return Some((yes_mod, no_mod));
+                return Some((browser_mod, key_mod));
             }
         }
         None
     }
 
     let noncolor = Modifier::REVERSED | Modifier::BOLD | Modifier::UNDERLINED;
-    // When Yes is highlighted, Yes must carry a non-color attribute that No
-    // doesn't, and vice versa.
-    let yes_hl = render_modifiers_on_yesno_row(true);
-    let no_hl = render_modifiers_on_yesno_row(false);
-    match (yes_hl, no_hl) {
-        (Some((yes_y, no_y)), Some((yes_n, no_n))) => {
-            let yes_distinct = (yes_y & noncolor) != (no_y & noncolor);
-            let no_distinct = (no_n & noncolor) != (yes_n & noncolor);
-            yes_distinct && no_distinct
+    let browser_hl = render_login_method_modifiers(true);
+    let key_hl = render_login_method_modifiers(false);
+    match (browser_hl, key_hl) {
+        (Some((browser_b, key_b)), Some((browser_k, key_k))) => {
+            let browser_distinct = (browser_b & noncolor) != (key_b & noncolor);
+            let key_distinct = (key_k & noncolor) != (browser_k & noncolor);
+            browser_distinct && key_distinct
         }
         _ => false,
     }
@@ -1845,7 +1841,7 @@ fn action_row_follows_prose() -> bool {
     });
     let action_idx = lines.iter().position(|l| {
         let lc = l.to_ascii_lowercase();
-        lc.contains("yes") && lc.contains("no")
+        lc.contains("browser sign-in") && lc.contains("daanio api key")
     });
     match (prose_idx, action_idx) {
         (Some(p), Some(a)) => p < a,
@@ -1902,13 +1898,11 @@ fn onboarding_eval_scorecard() {
         let phases = all_onboarding_phases();
         let mut welcome = 0u32;
         let mut picker = 0u32;
-        let mut transient = 0u32;
         let mut terminal = 0u32;
         for (_, p) in &phases {
             match classify_phase_surface(p) {
                 ScreenSurface::WelcomeBody => welcome += 1,
                 ScreenSurface::PickerOverlay => picker += 1,
-                ScreenSurface::Transient => transient += 1,
                 ScreenSurface::Terminal => terminal += 1,
             }
         }
@@ -2073,7 +2067,7 @@ fn onboarding_eval_scorecard() {
         );
         println!("entry paths       : {path_coverage} authored, {paths_reaching_terminal} terminate");
         println!(
-            "surface mix       : welcome={welcome} picker={picker} transient={transient} terminal={terminal}"
+            "surface mix       : welcome={welcome} picker={picker} terminal={terminal}"
         );
         // Coverage score: fraction of user-facing welcome screens scored, and
         // all paths terminate. Phase classification is always 100% (compile).
@@ -2193,18 +2187,17 @@ fn onboarding_eval_fidelity_real_transitions() {
             "authenticated startup must rest on StartChoice"
         );
 
-        // Edge: LoginOpenAi decline ('n') -> terminal Done, login still required
-        // (the decline path; reaches_ready=false in the table).
+        // Edge: Esc skips onboarding and reaches terminal Done.
         let mut app = create_test_app();
         app.onboarding_flow = None;
         app.begin_onboarding_flow_at_login();
         if let Some(flow) = app.onboarding_flow.as_mut() {
             flow.phase = OnboardingPhase::LoginOpenAi { yes_highlighted: true };
         }
-        assert!(app.handle_onboarding_continue_prompt_key(crossterm::event::KeyCode::Char('n')));
+        assert!(app.handle_onboarding_continue_prompt_key(crossterm::event::KeyCode::Esc));
         assert!(
             app.onboarding_phase().is_none(),
-            "decline must reach a terminal (Done) phase"
+            "Esc must reach a terminal (Done) phase"
         );
 
         // Edge: recovery Login{import:None} + Enter -> opens the provider picker
@@ -2239,25 +2232,24 @@ fn truncate(s: &str, n: usize) -> String {
 #[test]
 fn onboarding_eval_graph_fidelity() {
     with_temp_daanio_home(|| {
-        // Real transition: authenticated begin -> StartChoice.
+        // Real transition: authenticated begin -> required model selection.
         let mut app = create_test_app();
         app.onboarding_flow = None;
         app.begin_onboarding_flow();
         if let Some(phase) = app.onboarding_phase() {
-            assert_eq!(phase_to_node(phase), GraphNode::StartChoice);
-            assert!(node_props(phase_to_node(phase)).is_ready);
+            assert_eq!(phase_to_node(phase), GraphNode::ModelSelect);
+            assert!(!node_props(phase_to_node(phase)).is_ready);
         }
 
-        // Real transition: LoginOpenAi decline -> Done (a terminal, not-ready
-        // node). Confirms the LoginOpenAi->Done edge models a real path.
+        // Real transition: LoginOpenAi Esc -> Done (the explicit skip path).
         let mut app = create_test_app();
         app.onboarding_flow = None;
         app.begin_onboarding_flow_at_login();
         if let Some(flow) = app.onboarding_flow.as_mut() {
             flow.phase = OnboardingPhase::LoginOpenAi { yes_highlighted: true };
         }
-        assert!(app.handle_onboarding_continue_prompt_key(crossterm::event::KeyCode::Char('n')));
-        assert!(app.onboarding_phase().is_none(), "decline reaches terminal Done");
+        assert!(app.handle_onboarding_continue_prompt_key(crossterm::event::KeyCode::Esc));
+        assert!(app.onboarding_phase().is_none(), "Esc reaches terminal Done");
 
         // Every graph node maps back from at least one real phase (except the
         // virtual Start), so the node set isn't inventing screens.

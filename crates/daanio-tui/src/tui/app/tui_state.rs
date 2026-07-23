@@ -574,15 +574,15 @@ impl crate::tui::TuiState for App {
     fn display_messages_version(&self) -> u64 {
         self.display_messages_version
     }
-
     fn streaming_text(&self) -> &str {
         &self.streaming.streaming_text
     }
-
     fn input(&self) -> &str {
         &self.input
     }
-
+    fn input_is_secret(&self) -> bool {
+        matches!(self.pending_login, Some(super::PendingLogin::DaanioApiKey))
+    }
     fn cursor_pos(&self) -> usize {
         self.cursor_pos
     }

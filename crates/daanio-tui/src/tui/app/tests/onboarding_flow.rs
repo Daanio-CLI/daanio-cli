@@ -125,21 +125,19 @@ fn onboarding_strongest_model_only_runs_without_explicit_defaults() {
 }
 
 #[test]
-fn onboarding_begins_and_advances_past_model_select() {
+fn onboarding_begins_at_required_model_select() {
     let mut app = create_test_app();
     app.onboarding_flow = None;
     app.begin_onboarding_flow();
-    // `begin_onboarding_flow` immediately advances past the legacy ModelSelect
-    // phase into the action-only start choice.
     assert!(matches!(
         app.onboarding_phase(),
-        Some(OnboardingPhase::StartChoice { .. })
+        Some(OnboardingPhase::ModelSelect)
     ));
     // begin is idempotent: a second call does not reset the phase.
     app.begin_onboarding_flow();
     assert!(matches!(
         app.onboarding_phase(),
-        Some(OnboardingPhase::StartChoice { .. })
+        Some(OnboardingPhase::ModelSelect)
     ));
 }
 
@@ -299,13 +297,13 @@ fn login_phase_advances_to_model_select_without_telemetry_prompt() {
 }
 
 #[test]
-fn login_openai_phase_is_default_when_no_imports() {
+fn daanio_login_method_phase_defaults_to_browser_when_no_imports() {
     use crate::tui::OnboardingWelcomeKind;
     with_temp_daanio_home(|| {
         let mut app = create_test_app();
         app.onboarding_flow = None;
         // Fresh temp home has no importable logins, so begin_at_login lands on
-        // the "Log in to OpenAI?" Yes/No prompt (not the bare provider picker).
+        // the Daanio login-method prompt (not the bare provider picker).
         app.begin_onboarding_flow_at_login();
         assert!(matches!(
             app.onboarding_phase(),
@@ -323,7 +321,7 @@ fn login_openai_phase_is_default_when_no_imports() {
 }
 
 #[test]
-fn login_openai_no_finishes_onboarding_with_login_hint() {
+fn daanio_manual_login_choice_opens_hidden_key_prompt() {
     with_temp_daanio_home(|| {
         let mut app = create_test_app();
         app.onboarding_flow = None;
@@ -334,23 +332,15 @@ fn login_openai_no_finishes_onboarding_with_login_hint() {
             };
         }
         assert!(app.inline_interactive_state.is_none());
-        let before = app.display_messages().len();
-        // 'n' exits onboarding straight to the normal screen (no flaky inline
-        // provider picker) and tells the user to run /login when ready.
-        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char('n')));
-        // No inline picker is opened.
+        // Move to manual API-key entry and commit it.
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Right));
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Enter));
         assert!(app.inline_interactive_state.is_none());
-        // Onboarding is finished (Done phase is inactive, so the accessor
-        // reports no active phase).
-        assert!(app.onboarding_phase().is_none());
-        assert!(!app.onboarding_flow_active());
-        // A system message guides the user to /login.
-        let messages = app.display_messages();
-        assert_eq!(messages.len(), before + 1, "exactly one guidance message");
-        assert!(
-            messages.last().unwrap().content.contains("/login"),
-            "guidance message should mention /login: {:?}",
-            messages.last().unwrap().content
+        assert!(app.onboarding_flow_active());
+        assert!(matches!(app.pending_login, Some(PendingLogin::DaanioApiKey)));
+        assert_eq!(
+            app.status_notice.as_ref().map(|(notice, _)| notice.as_str()),
+            Some("Daanio login: paste your API key (input hidden)")
         );
     });
 }
@@ -366,7 +356,7 @@ fn login_openai_arrows_toggle_highlight() {
                 yes_highlighted: true,
             };
         }
-        // Right highlights No, Left highlights Yes; nothing commits yet.
+        // Right highlights manual key, Left highlights browser; nothing commits yet.
         assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Right));
         assert!(matches!(
             app.onboarding_phase(),
@@ -653,26 +643,28 @@ fn continue_prompt_key_ignored_when_not_in_phase() {
 
 #[test]
 fn onboarding_start_choice_is_action_only_and_defaults_to_review() {
-    let mut app = onboarding_test_app();
-    if let Some(flow) = app.onboarding_flow.as_mut() {
-        flow.phase = OnboardingPhase::ModelSelect;
-    }
+    with_temp_daanio_home(|| {
+        let mut app = onboarding_test_app();
+        if let Some(flow) = app.onboarding_flow.as_mut() {
+            flow.phase = OnboardingPhase::ModelSelect;
+        }
 
-    app.onboarding_after_model_select();
+        app.onboarding_after_model_select();
 
-    assert!(matches!(
-        app.onboarding_phase(),
-        Some(OnboardingPhase::StartChoice { .. })
-    ));
-    assert_eq!(app.session_picker_mode, SessionPickerMode::Onboarding);
-    let picker = app
-        .session_picker_overlay
-        .as_ref()
-        .expect("start choice picker")
-        .borrow();
-    assert_eq!(picker.visible_session_count(), 0);
-    assert!(picker.onboarding_review_recent_project_highlighted());
-    assert!(!picker.onboarding_start_new_highlighted());
+        assert!(matches!(
+            app.onboarding_phase(),
+            Some(OnboardingPhase::StartChoice { .. })
+        ));
+        assert_eq!(app.session_picker_mode, SessionPickerMode::Onboarding);
+        let picker = app
+            .session_picker_overlay
+            .as_ref()
+            .expect("start choice picker")
+            .borrow();
+        assert_eq!(picker.visible_session_count(), 0);
+        assert!(picker.onboarding_review_recent_project_highlighted());
+        assert!(!picker.onboarding_start_new_highlighted());
+    });
 }
 
 #[test]
@@ -935,10 +927,9 @@ fn local_post_import_validation_waits_for_model_activation() {
 #[test]
 fn startup_check_skips_user_with_established_session_history() {
     with_temp_daanio_home(|| {
-        // A low/missing launch_count alone must NOT classify someone as a new
-        // user when their daanio home has a substantial native session history
+        // A low launch_count does not override substantial native session history
         // (e.g. setup_hints.json was reset or lost). Seed >=10 native session
-        // files in the temp home.
+        // files in the temp home and preserve an already-saved model choice.
         let sessions_dir = crate::storage::daanio_dir()
             .expect("daanio dir")
             .join("sessions");
@@ -950,6 +941,7 @@ fn startup_check_skips_user_with_established_session_history() {
             )
             .expect("write session file");
         }
+        crate::config::Config::set_default_model(Some("claude-fable-5"), Some("daanio")).unwrap();
 
         let mut app = create_test_app();
         app.onboarding_flow = None;

@@ -7,9 +7,11 @@
 //!      user to log in right inside the TUI (the fresh
 //!      install no longer runs a blocking CLI login).
 //!      Skipped entirely when credentials already exist.
-//!   2. `StartChoice` - show two stacked actions: run a suggested Git-based bug
+//!   2. `ModelSelect` - require a model choice from the live account catalog.
+//!      The choice becomes the main-session default and the inherited agent model.
+//!   3. `StartChoice` - show two stacked actions: run a suggested Git-based bug
 //!      and architecture review, or start a blank new session.
-//!   3. `Suggestions` - the existing prompt-suggestion cards. Reached when
+//!   4. `Suggestions` - the existing prompt-suggestion cards. Reached when
 //!      they choose "Start a new session" or as the terminal resting state.
 //!
 //!   (`ContinuePrompt` is retained as a legacy phase for replay/test fixtures
@@ -241,21 +243,17 @@ pub(crate) enum OnboardingPhase {
     /// When `None`, there was nothing to import and we prompt the user to pick a
     /// provider manually (Enter opens the login picker).
     Login { import: Option<ImportReview> },
-    /// Ask the user whether to log in to OpenAI. Shown on a fresh install when
-    /// no importable external logins were detected. A highlightable Yes/No
-    /// selector (default "Yes") matching the import walkthrough: Yes starts the
-    /// OpenAI sign-in, No exits onboarding to the normal new-session screen with
-    /// a system message telling the user to run `/login` when ready (we avoid the
-    /// inline provider picker here). Unlike the import/telemetry prompts this one
-    /// has no auto-timeout: logging in is a meaningful first step, so we wait for
-    /// the user rather than opening a browser on a countdown.
+    /// Choose how to authenticate with the first-party Daanio gateway. The
+    /// browser device flow is highlighted by default and recommended; the
+    /// second choice accepts a Daanio API key and validates it against `/v1/me`
+    /// before saving it. The historical variant name is retained to avoid
+    /// invalidating persisted onboarding/simulator fixtures.
     LoginOpenAi {
-        /// Which option is highlighted (true = "Yes, log in to OpenAI").
+        /// `true` highlights browser sign-in; `false` highlights manual key entry.
         yes_highlighted: bool,
     },
-    /// Legacy phase kept for compatibility with older replay/test fixtures.
-    /// New onboarding skips explicit model selection and uses the default route;
-    /// users can still run `/model` later.
+    /// Choose the main model from the authenticated live catalog. New agents
+    /// inherit this choice unless their spawn explicitly selects another model.
     ModelSelect,
     /// "Continue where you left off in <cli>?" Yes/No with a
     /// [`DECISION_TIMEOUT`] countdown. Highlightable Yes/No selector to match
@@ -341,9 +339,7 @@ pub(crate) struct OnboardingFlow {
 }
 
 impl OnboardingFlow {
-    /// Start the post-login flow. The app immediately advances this legacy
-    /// phase to continue/suggestions so first-run onboarding no longer blocks on
-    /// choosing a model.
+    /// Start the post-login flow at required model selection.
     pub(crate) fn begin() -> Self {
         Self {
             phase: OnboardingPhase::ModelSelect,
@@ -353,7 +349,7 @@ impl OnboardingFlow {
     /// Start the flow at the login phase (no working credentials yet).
     /// `import` is the per-candidate import walkthrough when external logins
     /// were detected. When no logins were detected (`import` is `None`) we ask
-    /// whether to start secure Daanio browser sign-in.
+    /// which first-party Daanio login method to use.
     pub(crate) fn begin_at_login(import: Option<ImportReview>) -> Self {
         let phase = match import {
             Some(review) => OnboardingPhase::Login {
@@ -398,6 +394,52 @@ impl OnboardingFlow {
                 shown_at.elapsed() >= DECISION_TIMEOUT
             }
             _ => false,
+        }
+    }
+}
+
+impl super::App {
+    pub(super) fn needs_saved_model_setup() -> bool {
+        crate::config::config()
+            .provider
+            .default_model
+            .as_deref()
+            .is_none_or(|model| model.trim().is_empty())
+    }
+
+    pub(super) fn open_onboarding_model_picker(&mut self) {
+        self.set_status_notice("Choose the model for your main session and agents");
+        #[cfg(not(test))]
+        self.open_model_picker();
+    }
+
+    pub(super) fn save_onboarding_model_choice(&self) {
+        let selected = self.pending_route_selection.as_ref().map(|selection| {
+            crate::provider::MultiProvider::default_model_selection_from_route(
+                &selection.model,
+                &selection.api_method,
+                &selection.provider_label,
+            )
+        });
+        let model = selected
+            .as_ref()
+            .map(|selection| selection.model_spec.as_str())
+            .or(self.session.model.as_deref());
+        let provider_key = selected
+            .as_ref()
+            .and_then(|selection| selection.provider_key.as_deref())
+            .or(self.session.provider_key.as_deref());
+        if let Err(error) = crate::config::Config::set_default_model(model, provider_key) {
+            crate::logging::warn(&format!("Failed to save onboarding model choice: {error}"));
+        }
+    }
+
+    pub(super) fn finish_onboarding_model_setup(&mut self) {
+        if Self::is_new_user_install() {
+            self.onboarding_open_start_choice();
+        } else {
+            self.onboarding_finish();
+            self.set_status_notice("Model saved · new agents inherit it automatically");
         }
     }
 }

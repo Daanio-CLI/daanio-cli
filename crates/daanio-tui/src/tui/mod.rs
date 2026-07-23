@@ -39,6 +39,7 @@ pub mod test_harness;
 pub mod theme_detect;
 mod ui;
 mod ui_diff;
+mod ui_secret_input;
 pub mod usage_overlay;
 pub mod visual_debug;
 pub mod workspace_client;
@@ -190,9 +191,9 @@ pub trait TuiState {
     /// Version counter for display_messages (monotonic, increments on mutation)
     fn display_messages_version(&self) -> u64;
     fn streaming_text(&self) -> &str;
-
     // ---- Input ----
     fn input(&self) -> &str;
+    fn input_is_secret(&self) -> bool;
     fn cursor_pos(&self) -> usize;
     fn is_processing(&self) -> bool;
     fn queued_messages(&self) -> &[String];
@@ -821,9 +822,7 @@ pub enum PickerKind {
     Usage,
 }
 
-/// What the first-run onboarding welcome screen should render in its body,
-/// driven by the active onboarding flow phase. `Suggestions` is the default
-/// resting state (the starter prompt cards).
+/// First-run onboarding content rendered inside the welcome screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OnboardingWelcomeKind {
     /// Ask the user to log in first. Shown on a fresh install that booted
@@ -847,11 +846,13 @@ pub enum OnboardingWelcomeKind {
         /// option.
         repair_agent_label: Option<String>,
     },
-    /// Ask the user whether to log in to OpenAI (no detected imports). A
-    /// highlightable Yes/No selector; `yes_highlighted` reflects the current
-    /// choice. Yes starts the OpenAI sign-in, No skips login and finishes
-    /// onboarding (the user can run `/login` later).
-    LoginOpenAi { yes_highlighted: bool },
+    /// Choose first-party Daanio authentication. `yes_highlighted` is a legacy
+    /// field name: true means browser device flow (recommended), false means
+    /// manual Daanio API-key entry.
+    LoginOpenAi {
+        yes_highlighted: bool,
+    },
+    ModelSelect,
     /// "Continue where you left off in <cli>?" with a highlightable Yes/No
     /// selector and a live decision countdown (seconds remaining).
     ContinuePrompt {
@@ -859,7 +860,6 @@ pub enum OnboardingWelcomeKind {
         yes_highlighted: bool,
         seconds_left: u64,
     },
-    /// The starter prompt-suggestion cards (default).
     Suggestions,
 }
 
