@@ -568,7 +568,6 @@ impl App {
             return;
         }
 
-        let tier = crate::subscription_catalog::effective_tier();
         let existing = routes
             .iter()
             .filter(|route| {
@@ -581,8 +580,7 @@ impl App {
         for model in crate::subscription_catalog::curated_models()
             .iter()
             .filter(|model| {
-                tier.allows(model.min_tier)
-                    && !existing.contains(model.id)
+                !existing.contains(model.id)
                     && (!require_remote_advertisement
                         || self.remote_available_entries.iter().any(|available| {
                             crate::subscription_catalog::canonical_model_id(available)
@@ -635,8 +633,8 @@ impl App {
         if poisoned_by_daanio_subscription {
             // Version 1 could turn a mixed provider catalog into all-Daanio rows
             // after seeing just one managed subscription route. Rebuild ordinary
-            // routes from the names catalog, then append only the current tier's
-            // actual subscription entitlements.
+            // routes from the names catalog, then append managed routes that
+            // the authenticated remote catalog advertised.
             *routes = crate::provider::remote_model_routes_fallback(
                 self.remote_provider_name.as_deref(),
                 &self.remote_available_entries,
@@ -699,11 +697,9 @@ impl App {
             }
         }
         // Detailed provider hydration describes ordinary configured routes. A
-        // signed-in Daanio subscriber still needs the managed route for each
-        // entitled curated model alongside those Anthropic/OpenAI/etc. rows.
-        // The curated client catalog is versioned with the backend and is the
-        // authority for managed subscription entitlements. Do not hide newly
-        // launched subscription models behind a stale remote names snapshot.
+        // signed-in Daanio subscriber still needs a managed route for each
+        // curated model alongside those Anthropic/OpenAI/etc. rows. Runtime
+        // access is decided by the authenticated gateway, not cached tiers.
         self.append_daanio_subscription_routes(routes, true, false);
     }
 

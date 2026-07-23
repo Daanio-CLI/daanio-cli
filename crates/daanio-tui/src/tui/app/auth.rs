@@ -92,7 +92,7 @@ impl App {
             "  - Tier: {}\n",
             cached_tier
                 .map(|tier| tier.display_name().to_string())
-                .unwrap_or_else(|| "unknown (treated as Plus)".to_string())
+                .unwrap_or_else(|| "unknown".to_string())
         ));
         message.push_str(&format!(
             "  - Runtime mode: {}\n\n",

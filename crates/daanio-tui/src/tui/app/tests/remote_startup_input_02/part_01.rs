@@ -537,7 +537,7 @@ fn test_remote_mixed_catalog_keeps_daanio_subscription_separate_from_other_provi
 }
 
 #[test]
-fn test_remote_hydrated_catalog_adds_entitled_daanio_subscription_routes() {
+fn test_remote_hydrated_catalog_adds_all_daanio_subscription_routes() {
     with_temp_daanio_home(|| {
         let previous_key = std::env::var_os(crate::subscription_catalog::DAANIO_API_KEY_ENV);
         let previous_tier = std::env::var_os(crate::subscription_catalog::DAANIO_TIER_ENV);
@@ -615,9 +615,6 @@ fn test_remote_hydrated_catalog_adds_entitled_daanio_subscription_routes() {
             .collect::<Vec<_>>();
         let expected = crate::subscription_catalog::curated_models()
             .iter()
-            .filter(|model| {
-                crate::subscription_catalog::DaanioTier::Plus.allows(model.min_tier)
-            })
             .map(|model| model.id)
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(daanio_routes.len(), expected.len());
@@ -640,10 +637,7 @@ fn test_remote_hydrated_catalog_adds_entitled_daanio_subscription_routes() {
         }));
         assert!(app.remote_model_options.iter().all(|route| {
             route.provider != crate::subscription_catalog::DAANIO_PROVIDER_DISPLAY_NAME
-                || crate::subscription_catalog::find_curated_model(&route.model)
-                    .is_some_and(|model| {
-                        crate::subscription_catalog::DaanioTier::Plus.allows(model.min_tier)
-                    })
+                || crate::subscription_catalog::find_curated_model(&route.model).is_some()
         }));
     });
 }
@@ -692,13 +686,14 @@ fn test_remote_non_daanio_catalog_repairs_poisoned_all_daanio_routes() {
                     && route.api_method == crate::subscription_catalog::DAANIO_ROUTE_API_METHOD
             })
             .collect::<Vec<_>>();
-        assert_eq!(daanio_routes.len(), 3);
+        assert_eq!(daanio_routes.len(), 4);
         assert_eq!(
             daanio_routes
                 .iter()
                 .map(|route| route.model.as_str())
                 .collect::<std::collections::BTreeSet<_>>(),
             std::collections::BTreeSet::from([
+                "claude-fable-5",
                 "claude-opus-4-8",
                 "gpt-5.5",
                 "gpt-5.6-sol",
@@ -712,7 +707,7 @@ fn test_remote_non_daanio_catalog_repairs_poisoned_all_daanio_routes() {
             route.provider != crate::subscription_catalog::DAANIO_PROVIDER_DISPLAY_NAME
                 || matches!(
                     route.model.as_str(),
-                    "claude-opus-4-8" | "gpt-5.5" | "gpt-5.6-sol"
+                    "claude-fable-5" | "claude-opus-4-8" | "gpt-5.5" | "gpt-5.6-sol"
                 )
         }));
     });

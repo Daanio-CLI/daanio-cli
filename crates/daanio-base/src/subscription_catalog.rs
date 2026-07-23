@@ -84,11 +84,6 @@ impl DaanioTier {
             _ => None,
         }
     }
-
-    /// Whether an account on this tier may use a model gated at `required`.
-    pub fn allows(self, required: DaanioTier) -> bool {
-        self >= required
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -335,15 +330,6 @@ pub fn is_curated_model(model: &str) -> bool {
     canonical_model_id(model).is_some()
 }
 
-/// The effective subscription tier for gating decisions.
-///
-/// `/v1/me` is the source of truth; the last-known tier is persisted to
-/// `daanio.env` (`DAANIO_TIER`). Unknown/absent tier behaves like
-/// Plus for backward compatibility.
-pub fn effective_tier() -> DaanioTier {
-    cached_tier().unwrap_or(DaanioTier::Plus)
-}
-
 /// The last tier reported by the backend, if any was persisted.
 pub fn cached_tier() -> Option<DaanioTier> {
     provider_catalog::load_env_value_from_env_or_config(DAANIO_TIER_ENV, DAANIO_ENV_FILE)
@@ -358,14 +344,6 @@ pub fn store_cached_tier(tier: Option<DaanioTier>) -> anyhow::Result<()> {
         DAANIO_ENV_FILE,
         tier.map(DaanioTier::as_str),
     )
-}
-
-/// Whether the current (cached) tier is allowed to use `model`.
-/// Non-curated models return `false`.
-pub fn is_model_allowed_for_current_tier(model: &str) -> bool {
-    find_curated_model(model)
-        .map(|curated| effective_tier().allows(curated.min_tier))
-        .unwrap_or(false)
 }
 
 pub fn routing_policy_detail(model: &CuratedModel) -> String {
@@ -655,76 +633,30 @@ mod tests {
     }
 
     #[test]
-    fn tier_gating_follows_catalog_order() {
-        for (account_index, account_tier) in DaanioTier::ALL.iter().copied().enumerate() {
-            for (required_index, required_tier) in DaanioTier::ALL.iter().copied().enumerate() {
-                assert_eq!(
-                    account_tier.allows(required_tier),
-                    account_index >= required_index,
-                    "{} gating {}",
-                    account_tier.display_name(),
-                    required_tier.display_name()
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn model_entitlements_match_paid_tiers() {
+    fn model_catalog_preserves_tier_metadata() {
         for model in CURATED_MODELS {
             match model.id {
                 "claude-fable-5" => assert_eq!(model.min_tier, DaanioTier::Ultra),
                 _ => assert_eq!(model.min_tier, DaanioTier::Plus),
             }
         }
-
-        for tier in DaanioTier::ALL {
-            for model in EXPECTED_PLUS_MODELS {
-                assert!(tier.allows(find_curated_model(model).unwrap().min_tier));
-            }
-            assert_eq!(
-                tier.allows(find_curated_model("claude-fable-5").unwrap().min_tier),
-                matches!(tier, DaanioTier::Ultra | DaanioTier::Flagship)
-            );
-        }
     }
 
     #[test]
-    fn effective_tier_defaults_to_plus_when_unknown() {
+    fn cached_tier_round_trips_and_ignores_unknown_values() {
         let _guard = crate::storage::lock_test_env();
         crate::env::remove_var(DAANIO_TIER_ENV);
         let temp = tempfile::tempdir().expect("temp home");
         crate::env::set_var("DAANIO_HOME", temp.path().to_string_lossy().to_string());
 
         assert_eq!(cached_tier(), None);
-        assert_eq!(effective_tier(), DaanioTier::Plus);
-        for model in EXPECTED_PLUS_MODELS {
-            assert!(is_model_allowed_for_current_tier(model));
-        }
-        assert!(!is_model_allowed_for_current_tier("claude-fable-5"));
 
         crate::env::set_var(DAANIO_TIER_ENV, "mystery");
         assert_eq!(cached_tier(), None);
-        assert_eq!(effective_tier(), DaanioTier::Plus);
-
-        for tier in [DaanioTier::Pro, DaanioTier::Max] {
-            crate::env::set_var(DAANIO_TIER_ENV, tier.as_str());
-            assert_eq!(effective_tier(), tier);
-            for model in EXPECTED_PLUS_MODELS {
-                assert!(is_model_allowed_for_current_tier(model));
-            }
-            assert!(!is_model_allowed_for_current_tier("claude-fable-5"));
-        }
-
-        crate::env::set_var(DAANIO_TIER_ENV, DaanioTier::Ultra.as_str());
-        assert_eq!(effective_tier(), DaanioTier::Ultra);
-        assert!(is_model_allowed_for_current_tier("claude-fable-5"));
 
         crate::env::remove_var(DAANIO_TIER_ENV);
         store_cached_tier(Some(DaanioTier::Flagship)).expect("persist tier");
         assert_eq!(cached_tier(), Some(DaanioTier::Flagship));
-        assert!(is_model_allowed_for_current_tier("claude-fable-5"));
-        assert!(is_model_allowed_for_current_tier("gpt-5.6-sol"));
 
         store_cached_tier(None).expect("clear tier");
         assert_eq!(cached_tier(), None);

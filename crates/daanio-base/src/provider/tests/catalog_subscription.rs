@@ -258,7 +258,7 @@ fn test_subscription_model_guard_allows_only_curated_models_when_enabled() {
 }
 
 #[test]
-fn test_subscription_model_guard_gates_ultra_models_on_plus_tier() {
+fn test_subscription_model_guard_does_not_enforce_cached_tiers() {
     let _guard = crate::storage::lock_test_env();
     let temp_home = tempfile::tempdir().expect("temp home");
     crate::env::set_var("DAANIO_HOME", temp_home.path().to_string_lossy().to_string());
@@ -266,15 +266,12 @@ fn test_subscription_model_guard_gates_ultra_models_on_plus_tier() {
     crate::subscription_catalog::clear_runtime_env();
     crate::subscription_catalog::apply_runtime_env();
 
-    // Unknown/absent tier behaves like Plus: Sol is available, while the
-    // Ultra-tier Fable model is rejected with an upgrade hint.
+    // Cached account metadata must not decide runtime model access. The
+    // authenticated gateway catalog is authoritative.
     assert!(ensure_model_allowed_for_subscription("gpt-5.6-sol").is_ok());
-    let error = ensure_model_allowed_for_subscription("claude-fable-5")
-        .expect_err("fable should be gated on Plus");
-    assert!(error.to_string().contains("Ultra"), "{error}");
-    assert!(error.to_string().contains("Upgrade"), "{error}");
+    assert!(ensure_model_allowed_for_subscription("claude-fable-5").is_ok());
 
-    // Ultra tier unlocks Fable too.
+    // Changing the cached tier has no effect on client-side model selection.
     crate::env::set_var(crate::subscription_catalog::DAANIO_TIER_ENV, "ultra");
     assert!(ensure_model_allowed_for_subscription("claude-fable-5").is_ok());
     assert!(ensure_model_allowed_for_subscription("sol").is_ok());
@@ -302,7 +299,6 @@ fn test_filtered_display_models_respects_curated_subscription_catalog() {
         "claude-fable-5".to_string(),
     ]);
 
-    // Plus (default) tier includes Sol and hides only Ultra-tier Fable.
     assert_eq!(
         filtered,
         vec![
@@ -310,6 +306,7 @@ fn test_filtered_display_models_respects_curated_subscription_catalog() {
             "claude-sonnet-4-6".to_string(),
             "gpt-5.5".to_string(),
             "gpt-5.6-sol".to_string(),
+            "claude-fable-5".to_string(),
         ]
     );
 

@@ -42,17 +42,9 @@ impl DaanioProvider {
     }
 
     #[cfg(test)]
-    fn entitled_models_for(
-        tier: crate::subscription_catalog::DaanioTier,
-    ) -> impl Iterator<Item = &'static crate::subscription_catalog::CuratedModel> {
+    fn catalog_model_routes() -> Vec<ModelRoute> {
         crate::subscription_catalog::curated_models()
             .iter()
-            .filter(move |model| tier.allows(model.min_tier))
-    }
-
-    #[cfg(test)]
-    fn model_routes_for(tier: crate::subscription_catalog::DaanioTier) -> Vec<ModelRoute> {
-        Self::entitled_models_for(tier)
             .map(|model| Self::model_route(model.id.to_string()))
             .collect()
     }
@@ -491,19 +483,17 @@ mod tests {
 
     #[test]
     fn daanio_provider_exposes_only_explicit_subscription_routes() {
-        use crate::subscription_catalog::DaanioTier;
-
-        let plus_routes = DaanioProvider::model_routes_for(DaanioTier::Plus);
-        let gpt_route = plus_routes
+        let catalog_routes = DaanioProvider::catalog_model_routes();
+        let gpt_route = catalog_routes
             .iter()
             .find(|route| route.model == "gpt-5.5")
-            .expect("Plus tier includes GPT-5.5");
+            .expect("catalog includes GPT-5.5");
         let route_selection = daanio_provider_core::RouteSelection::from_model_route(gpt_route);
-        let flagship_routes = DaanioProvider::model_routes_for(DaanioTier::Flagship);
         let expected_models = vec![
             "claude-opus-4-8",
             "claude-sonnet-4-6",
             "gpt-5.5",
+            "claude-fable-5",
             "gpt-5.6-sol",
             "qwen3-coder-next",
             "devstral-2-123b",
@@ -522,26 +512,17 @@ mod tests {
         ];
 
         assert_eq!(
-            plus_routes
+            catalog_routes
                 .iter()
                 .map(|route| route.model.as_str())
                 .collect::<Vec<_>>(),
             expected_models
         );
-        assert!(plus_routes.iter().all(|route| {
+        assert!(catalog_routes.iter().all(|route| {
             route.provider == crate::subscription_catalog::DAANIO_PROVIDER_DISPLAY_NAME
                 && route.api_method == "daanio-subscription"
                 && route.available
         }));
-        assert_eq!(
-            DaanioProvider::entitled_models_for(DaanioTier::Plus)
-                .map(|model| model.id.to_string())
-                .collect::<Vec<_>>(),
-            expected_models
-                .iter()
-                .map(|model| (*model).to_string())
-                .collect::<Vec<_>>()
-        );
         assert_eq!(route_selection.routed_model_spec(), "gpt-5.5");
         assert_eq!(
             route_selection.runtime_key,
@@ -552,9 +533,9 @@ mod tests {
             route_selection.provider_label,
             crate::subscription_catalog::DAANIO_PROVIDER_DISPLAY_NAME
         );
-        assert_eq!(flagship_routes.len(), 19);
+        assert_eq!(catalog_routes.len(), 19);
         assert!(
-            flagship_routes
+            catalog_routes
                 .iter()
                 .any(|route| route.model == "claude-fable-5")
         );
