@@ -1,5 +1,4 @@
 use super::box_utils::render_rounded_box;
-use super::changelog::get_unseen_changelog_entries;
 use super::{
     TuiState, binary_age, dim_color, header_name_color, is_running_stable_release, semver,
     shorten_model_name,
@@ -26,7 +25,11 @@ fn unseen_changelog_entries() -> Vec<String> {
             return entries;
         }
     }
-    get_unseen_changelog_entries().clone()
+    // Daanio releases intentionally do not surface the repository's raw commit
+    // history in the startup header. The fork contains inherited upstream
+    // commits and internal release automation that are not user-facing product
+    // updates. `/changelog` remains available for curated release information.
+    Vec::new()
 }
 
 #[cfg(test)]

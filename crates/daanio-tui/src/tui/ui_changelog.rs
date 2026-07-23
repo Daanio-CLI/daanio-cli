@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 /// A changelog entry: hash, optional version tag, and commit subject.
 #[derive(Clone, Copy)]
 pub(super) struct ChangelogEntry<'a> {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub hash: &'a str,
     pub tag: &'a str,
     pub timestamp: Option<i64>,
@@ -150,50 +151,4 @@ pub(super) fn get_grouped_changelog() -> Vec<ChangelogGroup> {
             )
         })
         .clone()
-}
-
-/// Get changelog entries the user hasn't seen yet.
-/// Reads the last-seen commit hash from ~/.daanio/last_seen_changelog,
-/// filters the embedded changelog to only new entries, then saves the latest hash.
-/// Returns just the commit subjects (not the hashes).
-pub(super) fn get_unseen_changelog_entries() -> &'static Vec<String> {
-    static ENTRIES: OnceLock<Vec<String>> = OnceLock::new();
-    ENTRIES.get_or_init(|| {
-        let all_entries = parse_changelog();
-        if all_entries.is_empty() {
-            return Vec::new();
-        }
-
-        let state_file = dirs::home_dir()
-            .map(|h| h.join(".daanio").join("last_seen_changelog"))
-            .unwrap_or_else(|| std::path::PathBuf::from(".daanio/last_seen_changelog"));
-
-        let last_seen_hash = std::fs::read_to_string(&state_file)
-            .ok()
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
-
-        let new_entries: Vec<String> = if last_seen_hash.is_empty() {
-            all_entries
-                .iter()
-                .take(5)
-                .map(|e| e.subject.to_string())
-                .collect()
-        } else {
-            all_entries
-                .iter()
-                .take_while(|e| e.hash != last_seen_hash)
-                .map(|e| e.subject.to_string())
-                .collect()
-        };
-
-        if let Some(first) = all_entries.first() {
-            if let Some(parent) = state_file.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(&state_file, first.hash);
-        }
-
-        new_entries
-    })
 }
