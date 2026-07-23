@@ -14,8 +14,12 @@ target-ttest*/
 
 # Internal documentation and development/release helpers stay available in the
 # local working copy, but are intentionally not published in the public repo.
+# The two public installers remain tracked because website deployment and CI
+# verify them directly from a fresh checkout.
 /docs/
-/scripts/
+/scripts/*
+!/scripts/install.sh
+!/scripts/install.ps1
 
 # Stray experiment/debug artifacts at the repo root. Real assets live under
 # assets/, ios/, and tests/ and are committed explicitly.
