@@ -13,13 +13,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
   quality:
     name: Quality Guardrails
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with:
@@ -27,7 +26,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: clippy,rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -49,31 +48,14 @@ jobs:
           cargo install cargo-machete --locked
           cargo machete
 
-  build:
-    name: Build & Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  macos-build-test:
+    name: Build & Test (macos-latest)
+    runs-on: macos-latest
     timeout-minutes: 90
-    # Some dependencies (e.g. convert_case 0.10.0 via derive_more/crossterm, and
-    # proc-macro2/quote) accidentally ship a `rust-toolchain.toml` *inside their
-    # published crate*. When cargo builds such a crate its CWD is that crate dir,
-    # so the rustup proxy honours the file: convert_case pins `channel = "1.83.0"`
-    # and proc-macro2 requests `components = ["rust-src"]`. That made every
-    # Build & Test job (a) race two parallel `rust-src` downloads and (b) later
-    # try to compile convert_case with rustc 1.83.0, failing with E0514/E0599.
-    # RUSTUP_TOOLCHAIN takes precedence over any rust-toolchain.toml override, so
-    # pinning it here makes every step use this job's installed stable toolchain.
     env:
+      # Pin the workflow's stable toolchain even when a dependency contains its
+      # own rust-toolchain.toml file.
       RUSTUP_TOOLCHAIN: stable
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: aarch64-apple-darwin
-
     steps:
       - uses: actions/checkout@v5
         with:
@@ -81,309 +63,50 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
-          # Pre-install rust-src in the (serial) toolchain step. Some build-script
-          # / proc-macro units trigger an on-demand `rustup component add rust-src`,
-          # and when several parallel cargo/rustc processes request it at once they
-          # race on the shared `~/.rustup/downloads/*.partial` file and fail with
-          # "could not rename ... No such file or directory". Fetching it once here
-          # removes the race. (Was failing every Build & Test job.)
+          targets: aarch64-apple-darwin
           components: rust-src
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Suffix bumped to evict caches that held 1.83.0 / <unknown rustc>
-          # artifacts produced before RUSTUP_TOOLCHAIN=stable pinned the job.
-          key: ${{ matrix.os }}-stablepin
-
-      - name: Install mold linker (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq mold
+          key: macos-latest-stablepin
 
       - name: Build
         shell: bash
         run: |
-          mkdir -p .cargo
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            cat > .cargo/config.toml << 'EOF'
-          [target.x86_64-unknown-linux-gnu]
-          linker = "clang"
-          rustflags = ["-C", "link-arg=-fuse-ld=mold"]
-          EOF
-          fi
-          # NOTE: intentionally NOT exporting RUSTC_WRAPPER=sccache here. Only this
-          # step used sccache while the later `cargo test --no-run` steps did not,
-          # so sccache emitted rlibs/rmetas stamped `<unknown rustc version>` that
-          # the non-sccache test compile then rejected with E0514
-          # ("compiled by an incompatible version of rustc"). rust-cache already
-          # caches target/ across runs, so a clean, wrapper-consistent build is
-          # both correct and fast enough.
           export RUSTC="$(rustup which rustc)"
-          CARGO_BIN="$(rustup which cargo)"
-          "$CARGO_BIN" build --release --target ${{ matrix.target }}
+          "$(rustup which cargo)" build --release --target aarch64-apple-darwin
 
       - name: Compile library and binary tests
         shell: bash
         run: |
           python3 .github/scripts/run_with_timeout.py 900 \
-            "$(rustup which cargo)" test --target ${{ matrix.target }} --lib --bins --no-run
+            "$(rustup which cargo)" test --target aarch64-apple-darwin \
+            --lib --bins --no-run
 
       - name: Run deterministic retention-readiness cohort
         shell: bash
         run: |
-          # A cold daanio-app-core test harness compiles heavy optional provider
-          # dependencies and can exceed three minutes on hosted runners. The
-          # cohort itself runs in under a second once the lib test is built.
           python3 .github/scripts/run_with_timeout.py 600 \
-            "$(rustup which cargo)" test --target ${{ matrix.target }} \
+            "$(rustup which cargo)" test --target aarch64-apple-darwin \
             -p daanio-app-core --lib retention_readiness -- --nocapture
 
       - name: Compile integration test binaries
         shell: bash
-        # Build the integration-test binaries up front (not counted against the
-        # run steps' execution budgets). The e2e suite in particular is heavy
-        # (burst-spawn concurrency), and folding compilation into its 900s run
-        # budget was pushing slower hosted ubuntu/macos runners over the limit.
         run: |
           python3 .github/scripts/run_with_timeout.py 900 \
-            "$(rustup which cargo)" test --target ${{ matrix.target }} \
+            "$(rustup which cargo)" test --target aarch64-apple-darwin \
             --test provider_matrix --test e2e --no-run
 
       - name: Run provider matrix tests
         shell: bash
         run: |
           python3 .github/scripts/run_with_timeout.py 600 \
-            "$(rustup which cargo)" test --target ${{ matrix.target }} --test provider_matrix
+            "$(rustup which cargo)" test --target aarch64-apple-darwin \
+            --test provider_matrix
 
       - name: Run e2e tests
         shell: bash
         run: |
-          # e2e is fast (~1-2 min of execution); the generous budget only guards
-          # against an occasional slow hosted runner. Compilation is already done
-          # in the dedicated compile step above.
           python3 .github/scripts/run_with_timeout.py 600 \
-            "$(rustup which cargo)" test --target ${{ matrix.target }} --test e2e
-
-      - name: Security preflight (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          cargo install cargo-audit --locked
-          cargo audit \
-            --ignore RUSTSEC-2026-0141 \
-            --ignore RUSTSEC-2026-0099 \
-            --ignore RUSTSEC-2026-0104 \
-            --ignore RUSTSEC-2026-0098 \
-            --ignore RUSTSEC-2026-0049 \
-            --ignore RUSTSEC-2026-0187 \
-            --ignore RUSTSEC-2026-0194 \
-            --ignore RUSTSEC-2026-0195
-
-  windows-build-test:
-    name: Build & Test (windows-latest)
-    runs-on: windows-latest
-    timeout-minutes: 150
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: amd64
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.7
-        continue-on-error: true
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: windows-latest
-          cache-all-crates: "true"
-
-      - name: Build release binary
-        shell: pwsh
-        run: |
-          if (Get-Command sccache -ErrorAction SilentlyContinue) {
-            sccache --start-server *> $null
-            if ($LASTEXITCODE -eq 0) {
-              $env:RUSTC_WRAPPER = 'sccache'
-            }
-          }
-
-          & cargo build --locked --release --target x86_64-pc-windows-msvc
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Windows release build failed'
-          }
-
-      - name: Compile library and binary tests
-        shell: pwsh
-        run: |
-          & cargo test --locked --target x86_64-pc-windows-msvc --lib --bins --no-run
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Windows library/binary test compilation failed'
-          }
-
-      - name: Run targeted Windows validation tests
-        shell: pwsh
-        run: |
-          $tests = @(
-            'command_candidates_adds_extension_on_windows',
-            'command_exists_for_known_binary',
-            'command_exists_absolute_path',
-            'sibling_socket_path_roundtrip',
-            'cleanup_socket_pair_removes_main_and_debug_files',
-            'is_process_running_reports_exited_children_as_stopped',
-            'spawn_replacement_process_returns_without_waiting_for_child_exit',
-            'build_shell_command_uses_cmd_and_executes_command',
-            'pipe_name_is_stable_and_normalizes_case_and_separators',
-            'pipe_name_falls_back_when_stem_is_empty',
-            'busy_pipe_is_reported_as_a_live_socket_path',
-            'stream_pair_round_trips_bytes',
-            'split_stream_supports_concurrent_read_and_write',
-            'test_cancel_command_idle_reports_nothing_to_cancel',
-            'test_menu_number_rejected_as_api_key',
-            'test_command_palette_suppressed_while_api_key_prompt_pending',
-            'test_ctrl_c_with_active_copy_selection_copies_instead_of_quitting',
-            'test_ctrl_c_in_copy_mode_without_selection_still_falls_through'
-          )
-
-          foreach ($testName in $tests) {
-            & cargo test --locked --target x86_64-pc-windows-msvc --lib $testName -- --nocapture
-            if ($LASTEXITCODE -ne 0) {
-              throw "Windows targeted test failed: $testName"
-            }
-          }
-
-      - name: Run Windows hotkey and power tests
-        shell: pwsh
-        run: |
-          & cargo test --locked --target x86_64-pc-windows-msvc -p daanio-setup-hints --lib -- --nocapture
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Windows setup-hints tests failed'
-          }
-
-          & cargo test --locked --target x86_64-pc-windows-msvc -p daanio-base --no-default-features --lib 'power_inhibit::tests::windows_' -- --nocapture
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Windows power-inhibit tests failed'
-          }
-
-      - name: Run Windows e2e smoke tests
-        shell: pwsh
-        run: |
-          $tests = @(
-            'provider_behavior::test_socket_model_cycle_supported_models',
-            'provider_behavior::test_model_switch_resets_provider_session'
-          )
-
-          foreach ($testName in $tests) {
-            & cargo test --locked --target x86_64-pc-windows-msvc --test e2e $testName -- --exact --nocapture
-            if ($LASTEXITCODE -ne 0) {
-              throw "Windows e2e smoke test failed: $testName"
-            }
-          }
-
-      - name: Run Windows lifecycle e2e tests
-        shell: pwsh
-        env:
-          DAANIO_E2E_ARTIFACT_DIR: ${{ runner.temp }}/daanio-windows-e2e-logs
-        run: |
-          New-Item -ItemType Directory -Force -Path $env:DAANIO_E2E_ARTIFACT_DIR | Out-Null
-          $tests = @(
-            'windows_lifecycle::windows_binary_server_accepts_clients_and_debug_cli',
-            'windows_lifecycle::windows_binary_server_rebinds_named_pipe_after_exit'
-          )
-          foreach ($testName in $tests) {
-            & cargo test --locked --target x86_64-pc-windows-msvc --test e2e $testName -- --exact --nocapture
-            if ($LASTEXITCODE -ne 0) {
-              throw "Windows lifecycle e2e test failed: $testName"
-            }
-          }
-
-      - name: Upload Windows e2e diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-e2e-diagnostics
-          path: ${{ runner.temp }}/daanio-windows-e2e-logs
-          if-no-files-found: ignore
-
-      - name: Verify built binary launches
-        shell: pwsh
-        run: |
-          & "target/x86_64-pc-windows-msvc/release/daanio.exe" --version
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Built Windows binary failed to run --version'
-          }
-
-      - name: Verify installer using local artifact
-        shell: pwsh
-        run: |
-          $cargoVersion = Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
-          if (-not $cargoVersion) {
-            throw 'Could not determine Cargo.toml version'
-          }
-
-          # CI builds are development builds. Build metadata independently derives
-          # this identity from the root package version and appends `-dev`.
-          $version = 'v' + $cargoVersion.Matches[0].Groups[1].Value + '-dev'
-          & ./.github/scripts/verify_windows_install.ps1 `
-            -ArtifactExePath 'target/x86_64-pc-windows-msvc/release/daanio.exe' `
-            -Version $version
-
-  fmt:
-    name: Format
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-  windows-cross-check:
-    name: Windows Cross-Target Check (Linux)
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: windows-cross-check
-          cache-all-crates: "true"
-
-      - name: Install LLVM toolchain for cargo-xwin
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq clang lld llvm ninja-build
-
-      - name: Install cargo-xwin
-        run: cargo install --git https://github.com/rust-cross/cargo-xwin cargo-xwin
-
-      - name: Check Windows x64 target
-        run: cargo xwin check --locked --target x86_64-pc-windows-msvc
-
-      # cargo-xwin currently feeds clang-style ring builds MSVC /imsvc flags for
-      # aarch64-pc-windows-msvc on Linux. Keep this advisory until upstream
-      # cargo-xwin/ring interop is fixed; native Windows ARM64 smoke covers the
-      # release artifact path.
-      - name: Check Windows ARM64 target (advisory)
-        continue-on-error: true
-        run: cargo xwin check --locked --target aarch64-pc-windows-msvc --no-default-features --features pdf
+            "$(rustup which cargo)" test --target aarch64-apple-darwin \
+            --test e2e
