@@ -98,6 +98,13 @@ fn initial_subscribe_working_dir(request: &Request) -> std::result::Result<Strin
     }
 }
 
+fn request_switches_active_model(request: &Request) -> bool {
+    matches!(
+        request,
+        Request::CycleModel { .. } | Request::SetModel { .. } | Request::SetRoute { .. }
+    )
+}
+
 struct ProcessingMessage {
     id: u64,
     content: String,
@@ -1062,6 +1069,57 @@ pub(super) async fn handle_client(
                     request_decoded_at.elapsed().as_millis().to_string(),
                 ));
                 crate::logging::event_info("SERVER_REQUEST_LIFECYCLE", fields);
+            }
+        }
+
+        // A model selected while the old model is still generating must take
+        // effect immediately. Previously the provider mutation was deferred on
+        // the busy agent mutex, leaving the UI on e.g. "Opus 4.6 thinking"
+        // until that old turn eventually finished. Stop the in-flight turn via
+        // the lock-free cancellation handle before applying the new model.
+        if request_switches_active_model(&request)
+            && (client_is_processing || processing_task.is_some())
+        {
+            crate::logging::event_info(
+                "SERVER_MODEL_SWITCH_INTERRUPTING_ACTIVE_TURN",
+                vec![
+                    ("request_id", request.id().to_string()),
+                    ("request_kind", request_kind.clone()),
+                    ("session_id", client_session_id.clone()),
+                    (
+                        "message_id",
+                        processing_message_id
+                            .map(|id| id.to_string())
+                            .unwrap_or_default(),
+                    ),
+                ],
+            );
+            cancel_processing_message(
+                &mut ProcessingState {
+                    client_is_processing: &mut client_is_processing,
+                    message_id: &mut processing_message_id,
+                    session_id: &mut processing_session_id,
+                    task: &mut processing_task,
+                },
+                &session_control,
+                &client_event_tx,
+                &SwarmStatusRefs {
+                    members: &swarm_members,
+                    swarms_by_id: &swarms_by_id,
+                    event_history: &event_history,
+                    event_counter: &event_counter,
+                    event_tx: &swarm_event_tx,
+                },
+                Some(request.id()),
+                Some(request_decoded_at),
+            )
+            .await;
+            if !client_is_processing {
+                let mut connections = client_connections.write().await;
+                if let Some(info) = connections.get_mut(&client_connection_id) {
+                    info.is_processing = false;
+                    info.current_tool_name = None;
+                }
             }
         }
 

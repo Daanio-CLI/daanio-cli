@@ -18,6 +18,34 @@ struct IsolatedReloadRecoveryEnv {
     _runtime: tempfile::TempDir,
 }
 
+#[test]
+fn active_model_switch_requests_are_identified_for_turn_interruption() {
+    assert!(request_switches_active_model(&Request::CycleModel {
+        id: 1,
+        direction: 1,
+    }));
+    assert!(request_switches_active_model(&Request::SetModel {
+        id: 2,
+        model: "gpt-5.6-sol".to_string(),
+    }));
+    assert!(request_switches_active_model(&Request::SetRoute {
+        id: 3,
+        selection: crate::provider::RouteSelection::from_model_route(
+            &crate::provider::ModelRoute {
+                model: "gpt-5.6-terra".to_string(),
+                provider: "Daanio".to_string(),
+                api_method: "daanio-subscription".to_string(),
+                available: true,
+                detail: String::new(),
+                cheapness: None,
+            },
+        ),
+    }));
+    assert!(!request_switches_active_model(&Request::RefreshModels {
+        id: 4,
+    }));
+}
+
 #[tokio::test]
 async fn session_control_handle_does_not_wait_for_busy_agent_lock() {
     let provider: Arc<dyn Provider> = Arc::new(PanicOnForkProvider {
