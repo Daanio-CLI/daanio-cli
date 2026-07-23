@@ -2046,7 +2046,7 @@ impl Tool for CommunicateTool {
                 },
                 "model": {
                     "type": "string",
-                    "description": "Optional model for the spawned agent (spawn, and spawns triggered by assign_task/assign_next/run_plan). Overrides the agents.swarm_model config pin for this call. Accepts a bare model name (e.g. 'gpt-5.5') or an auth-route-prefixed form (e.g. 'openai-api:gpt-5.5', 'claude-api:claude-fable-5'). Use 'inherit' to force coordinator inheritance. Omit to use the configured/coordinator default. Run action=list_models to see available models and routes."
+                    "description": "Optional model for the spawned agent (spawn, and spawns triggered by assign_task/assign_next/run_plan). Overrides the agents.swarm_model config pin for this call. Accepts a bare model name (e.g. 'gpt-5.5') or an auth-route-prefixed form (e.g. 'openai-api:gpt-5.5', 'claude-api:claude-fable-5'). Use 'inherit' to force coordinator inheritance. Omit to inherit the coordinator's selected model (or an explicitly configured agents.swarm_model); spawning fails if none is selected. Run action=list_models to see available models and routes."
                 },
                 "effort": {
                     "type": "string",

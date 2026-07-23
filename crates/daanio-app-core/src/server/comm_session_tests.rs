@@ -2,9 +2,9 @@
 
 use super::{
     CoordinatorSpawnIdentity, ensure_spawn_coordinator_swarm, prepare_visible_spawn_session,
-    register_visible_spawned_member, resolve_coordinator_spawn_identity, resolve_spawn_working_dir,
-    resolve_stop_target_session, resolve_swarm_spawn_selection, spawn_admission_lock,
-    swarm_stop_allowed_by_owner,
+    register_visible_spawned_member, require_swarm_spawn_model, resolve_coordinator_spawn_identity,
+    resolve_spawn_working_dir, resolve_stop_target_session, resolve_swarm_spawn_selection,
+    spawn_admission_lock, swarm_stop_allowed_by_owner,
 };
 use crate::agent::Agent;
 use crate::message::{Message, ToolDefinition};
@@ -607,10 +607,10 @@ fn resolve_swarm_spawn_model_auth_route_prefixes_pin_expected_routes() {
 }
 
 #[test]
-fn resolve_swarm_spawn_model_daanio_subscription_always_inherits_coordinator() {
+fn resolve_swarm_spawn_model_daanio_subscription_inherits_without_override() {
     let selection = resolve_swarm_spawn_selection(
-        Some("daanio-subscription:gpt-5.6-sol".to_string()),
-        Some("some-stale-config-model".to_string()),
+        None,
+        None,
         &coordinator_identity(
             Some("claude-fable-5"),
             Some("daanio"),
@@ -619,6 +619,26 @@ fn resolve_swarm_spawn_model_daanio_subscription_always_inherits_coordinator() {
     );
 
     assert_eq!(selection.model.as_deref(), Some("claude-fable-5"));
+    assert_eq!(selection.provider_key.as_deref(), Some("daanio"));
+    assert_eq!(
+        selection.route_api_method.as_deref(),
+        Some("daanio-subscription")
+    );
+}
+
+#[test]
+fn resolve_swarm_spawn_model_daanio_subscription_allows_explicit_override() {
+    let selection = resolve_swarm_spawn_selection(
+        Some("daanio-subscription:gpt-5.6-sol".to_string()),
+        None,
+        &coordinator_identity(
+            Some("claude-fable-5"),
+            Some("daanio"),
+            Some("daanio-subscription"),
+        ),
+    );
+
+    assert_eq!(selection.model.as_deref(), Some("gpt-5.6-sol"));
     assert_eq!(selection.provider_key.as_deref(), Some("daanio"));
     assert_eq!(
         selection.route_api_method.as_deref(),
@@ -640,6 +660,13 @@ fn resolve_swarm_spawn_model_daanio_prefix_is_normalized_without_coordinator_ide
         selection.route_api_method.as_deref(),
         Some("daanio-subscription")
     );
+}
+
+#[test]
+fn swarm_spawn_requires_an_explicit_or_coordinator_model() {
+    let selection = resolve_swarm_spawn_selection(None, None, &CoordinatorSpawnIdentity::default());
+
+    assert!(require_swarm_spawn_model(&selection).is_err());
 }
 
 #[test]
