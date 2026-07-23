@@ -29,11 +29,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Render a human-readable changelog for the release body (issue #435):
-      # changelog/v<version>.json when present, otherwise grouped commit
-      # subjects since the previous tag, always ending with the compare link.
       - name: Generate release notes
-        run: scripts/generate_release_notes.sh "${GITHUB_REF_NAME}" > release_notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f "tag_name=${GITHUB_REF_NAME}" \
+            --jq '.body' > release_notes.md
 
       # Stage platform assets on a draft. The final job publishes every
       # successfully completed asset and records unavailable platforms.
@@ -68,13 +71,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - # Build Linux x86_64 release assets on a CentOS 7 / manylinux2014
-            # glibc 2.17 baseline so they run on older distros as well as newer
-            # Debian/Ubuntu containers used by many TB tasks.
-            os: ubuntu-22.04
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact: daanio-linux-x86_64
-            compat_container: true
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact: daanio-linux-aarch64
@@ -112,7 +111,6 @@ jobs:
           sudo apt-get install -y -qq mold
 
       - name: Build release binary
-        if: matrix.compat_container != true
         shell: bash
         run: |
           mkdir -p .cargo
@@ -131,17 +129,7 @@ jobs:
           DAANIO_RELEASE_BUILD: "1"
           DAANIO_BUILD_SEMVER: ${{ github.ref_name }}
 
-      - name: Build portable Linux x86_64 release binary
-        if: matrix.compat_container == true
-        shell: bash
-        run: scripts/build_linux_compat.sh dist
-        env:
-          DAANIO_RELEASE_BUILD: "1"
-          DAANIO_BUILD_SEMVER: ${{ github.ref_name }}
-          DAANIO_COMPAT_ARTIFACT: ${{ matrix.artifact }}
-
       - name: Package binary
-        if: matrix.compat_container != true
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/daanio dist/${{ matrix.artifact }}
@@ -341,7 +329,7 @@ jobs:
 
           $signingRequired = $env:WINDOWS_SIGNING_REQUIRED -ne 'false'
           if (-not $configured -and $signingRequired) {
-            throw 'Windows signing is required, but Azure Artifact Signing configuration is incomplete. See docs/WINDOWS.md.'
+            throw 'Windows signing is required, but Azure Artifact Signing configuration is incomplete.'
           }
           if (-not $configured) {
             Write-Warning 'Publishing unsigned Windows assets because WINDOWS_SIGNING_REQUIRED=false. This override is not suitable for an official Windows release.'
@@ -430,8 +418,8 @@ jobs:
 
           The unsigned `windows-unsigned-x86_64` and `windows-unsigned-aarch64`
           workflow artifacts are ready for the private signing workstation.
-          Follow `docs/WINDOWS_MANUAL_SIGNING.md`; never publish these unsigned
-          binaries as official release assets.
+          Use the private signing runbook; never publish these unsigned binaries
+          as official release assets.
           '@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
   build-freebsd:
@@ -705,17 +693,6 @@ jobs:
             echo "Release ${GITHUB_REF_NAME} is already public; leaving it public."
           fi
 
-      # Releases created with GITHUB_TOKEN do not trigger `release: published`,
-      # but workflow_dispatch is allowed. Queue the dedicated, per-tag
-      # announcement workflow without letting Discord block package publishing.
-      - name: Queue Discord release announcement
-        id: discord_announcement
-        continue-on-error: true
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run discord-release.yml --ref "$DEFAULT_BRANCH" -f "tag=${GITHUB_REF_NAME}"
-
       - name: Update Homebrew formula
         env:
           HOMEBREW_DEPLOY_KEY: ${{ secrets.HOMEBREW_DEPLOY_KEY }}
@@ -914,9 +891,3 @@ jobs:
               --reason completed
             gh issue edit "$issue" --remove-label "$label" || true
           done
-
-      - name: Report Discord announcement queue failure
-        if: always() && steps.discord_announcement.outcome == 'failure'
-        run: |
-          echo "The release was published, but its Discord announcement could not be queued." >&2
-          exit 1

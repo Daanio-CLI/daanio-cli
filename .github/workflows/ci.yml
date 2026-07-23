@@ -43,52 +43,11 @@ jobs:
       - name: Run clippy with warnings denied
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Enforce warning budget
-        shell: bash
-        run: scripts/check_warning_budget.sh
-
-      - name: Enforce oversized-file ratchet
-        shell: bash
-        run: python3 scripts/check_code_size_budget.py
-
-      - name: Enforce oversized-test ratchet
-        shell: bash
-        run: python3 scripts/check_test_size_budget.py
-
-      - name: Enforce panic-prone usage ratchet
-        shell: bash
-        run: python3 scripts/check_panic_budget.py
-
-      - name: Enforce swallowed-error usage ratchet
-        shell: bash
-        run: python3 scripts/check_swallowed_error_budget.py
-
-      - name: Enforce crate dependency boundaries
-        shell: bash
-        run: python3 scripts/check_dependency_boundaries.py
-
-      - name: Enforce wildcard re-export ratchet
-        shell: bash
-        run: python3 scripts/check_wildcard_reexport_budget.py
-
       - name: Enforce no unused dependencies
         shell: bash
         run: |
           cargo install cargo-machete --locked
           cargo machete
-
-  release-automation:
-    name: Release Automation
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Test Discord release announcements
-        run: python3 -m unittest -v scripts/test_post_discord_release.py
-
-      - name: Compile release automation scripts
-        run: python3 -m py_compile scripts/post_discord_release.py scripts/test_post_discord_release.py
 
   build:
     name: Build & Test (${{ matrix.os }})
@@ -207,24 +166,20 @@ jobs:
           python3 .github/scripts/run_with_timeout.py 600 \
             "$(rustup which cargo)" test --target ${{ matrix.target }} --test e2e
 
-      - name: Check PowerShell script syntax (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          ./scripts/check_powershell_syntax.ps1
-
-      - name: Enforce warning budget (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          scripts/check_warning_budget.sh
-
       - name: Security preflight (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           cargo install cargo-audit --locked
-          scripts/security_preflight.sh --strict
+          cargo audit \
+            --ignore RUSTSEC-2026-0141 \
+            --ignore RUSTSEC-2026-0099 \
+            --ignore RUSTSEC-2026-0104 \
+            --ignore RUSTSEC-2026-0098 \
+            --ignore RUSTSEC-2026-0049 \
+            --ignore RUSTSEC-2026-0187 \
+            --ignore RUSTSEC-2026-0194 \
+            --ignore RUSTSEC-2026-0195
 
   windows-build-test:
     name: Build & Test (windows-latest)
@@ -300,24 +255,24 @@ jobs:
           )
 
           foreach ($testName in $tests) {
-            & ./scripts/invoke_cargo_with_timeout.ps1 `
-              -Name "Windows targeted test: $testName" `
-              -TimeoutSeconds 300 `
-              -CargoArgs @('test', '--locked', '--target', 'x86_64-pc-windows-msvc', '--lib', $testName, '--', '--nocapture')
+            & cargo test --locked --target x86_64-pc-windows-msvc --lib $testName -- --nocapture
+            if ($LASTEXITCODE -ne 0) {
+              throw "Windows targeted test failed: $testName"
+            }
           }
 
       - name: Run Windows hotkey and power tests
         shell: pwsh
         run: |
-          & ./scripts/invoke_cargo_with_timeout.ps1 `
-            -Name 'Windows setup-hints tests' `
-            -TimeoutSeconds 300 `
-            -CargoArgs @('test', '--locked', '--target', 'x86_64-pc-windows-msvc', '-p', 'daanio-setup-hints', '--lib', '--', '--nocapture')
+          & cargo test --locked --target x86_64-pc-windows-msvc -p daanio-setup-hints --lib -- --nocapture
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows setup-hints tests failed'
+          }
 
-          & ./scripts/invoke_cargo_with_timeout.ps1 `
-            -Name 'Windows power-inhibit tests' `
-            -TimeoutSeconds 900 `
-            -CargoArgs @('test', '--locked', '--target', 'x86_64-pc-windows-msvc', '-p', 'daanio-base', '--no-default-features', '--lib', 'power_inhibit::tests::windows_', '--', '--nocapture')
+          & cargo test --locked --target x86_64-pc-windows-msvc -p daanio-base --no-default-features --lib 'power_inhibit::tests::windows_' -- --nocapture
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows power-inhibit tests failed'
+          }
 
       - name: Run Windows e2e smoke tests
         shell: pwsh
@@ -328,10 +283,10 @@ jobs:
           )
 
           foreach ($testName in $tests) {
-            & ./scripts/invoke_cargo_with_timeout.ps1 `
-              -Name "Windows e2e smoke test: $testName" `
-              -TimeoutSeconds 420 `
-              -CargoArgs @('test', '--locked', '--target', 'x86_64-pc-windows-msvc', '--test', 'e2e', $testName, '--', '--exact', '--nocapture')
+            & cargo test --locked --target x86_64-pc-windows-msvc --test e2e $testName -- --exact --nocapture
+            if ($LASTEXITCODE -ne 0) {
+              throw "Windows e2e smoke test failed: $testName"
+            }
           }
 
       - name: Run Windows lifecycle e2e tests
@@ -345,10 +300,10 @@ jobs:
             'windows_lifecycle::windows_binary_server_rebinds_named_pipe_after_exit'
           )
           foreach ($testName in $tests) {
-            & ./scripts/invoke_cargo_with_timeout.ps1 `
-              -Name "Windows lifecycle e2e test: $testName" `
-              -TimeoutSeconds 420 `
-              -CargoArgs @('test', '--locked', '--target', 'x86_64-pc-windows-msvc', '--test', 'e2e', $testName, '--', '--exact', '--nocapture')
+            & cargo test --locked --target x86_64-pc-windows-msvc --test e2e $testName -- --exact --nocapture
+            if ($LASTEXITCODE -ne 0) {
+              throw "Windows lifecycle e2e test failed: $testName"
+            }
           }
 
       - name: Upload Windows e2e diagnostics
@@ -366,12 +321,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw 'Built Windows binary failed to run --version'
           }
-
-      - name: Run Windows installer lifecycle tests
-        shell: pwsh
-        run: |
-          & ./scripts/test_windows_launcher_install.ps1
-          & ./scripts/test_windows_setup_evaluation.ps1
 
       - name: Verify installer using local artifact
         shell: pwsh
@@ -401,39 +350,6 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
-
-  setup-friction:
-    name: Setup Friction Eval (Linux installer)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install probe shells
-        run: sudo apt-get update && sudo apt-get install -y fish zsh
-
-      - name: Installer conversion telemetry tests
-        run: bash scripts/test_install_conversion.sh
-
-      - name: Setup friction scorecard
-        run: bash scripts/setup_friction_eval.sh
-
-  powershell-syntax:
-    name: PowerShell Syntax
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Check PowerShell script syntax (Windows PowerShell 5.1)
-        shell: powershell
-        run: |
-          & ./scripts/check_powershell_syntax.ps1
-
-      - name: Check PowerShell script syntax (PowerShell 7)
-        shell: pwsh
-        run: |
-          & ./scripts/check_powershell_syntax.ps1
 
   windows-cross-check:
     name: Windows Cross-Target Check (Linux)

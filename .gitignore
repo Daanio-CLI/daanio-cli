@@ -12,8 +12,13 @@ ios_simulator_screenshot.png
 target-ttest/
 target-ttest*/
 
+# Internal documentation and development/release helpers stay available in the
+# local working copy, but are intentionally not published in the public repo.
+/docs/
+/scripts/
+
 # Stray experiment/debug artifacts at the repo root. Real assets live under
-# assets/, docs/, ios/, and tests/ and are committed explicitly.
+# assets/, ios/, and tests/ and are committed explicitly.
 /*.log
 /*.avif
 /*.mp4
