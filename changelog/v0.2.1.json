@@ -1,0 +1,14 @@
+{
+  "version": "0.2.1",
+  "date": "2026-07-24",
+  "title": "Server-authoritative model access",
+  "highlights": [
+    "Daanio model and headless-agent selection now relies on the authenticated gateway catalog instead of locally cached subscription tiers"
+  ],
+  "improvements": [
+    "The model picker shows curated managed routes without hiding models based on cached tier metadata"
+  ],
+  "fixes": [
+    "Accounts reporting Plan: none no longer receive a misleading client-side current tier: Plus error when selecting a model"
+  ]
+}
