@@ -844,6 +844,10 @@ impl TuiState for BenchState {
         &self.input
     }
 
+    fn input_is_secret(&self) -> bool {
+        false
+    }
+
     fn cursor_pos(&self) -> usize {
         self.cursor_pos
     }
