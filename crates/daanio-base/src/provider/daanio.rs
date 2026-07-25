@@ -1,6 +1,5 @@
 use super::{EventStream, ModelRoute, MultiProvider, NativeToolResultSender, Provider, copilot};
 use crate::message::{Message, ToolDefinition};
-use crate::provider::models::ensure_model_allowed_for_subscription;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::{Arc, RwLock};
@@ -118,6 +117,10 @@ impl DaanioProvider {
     }
 
     fn resolve_requested_model(&self, model: &str) -> Result<String> {
+        let model = model.trim();
+        if model.is_empty() {
+            anyhow::bail!("Daanio model cannot be empty");
+        }
         let canonical = crate::subscription_catalog::canonical_model_id(model).unwrap_or(model);
         let live_models = self
             .live_models
@@ -134,7 +137,10 @@ impl DaanioProvider {
                     )
                 });
         }
-        ensure_model_allowed_for_subscription(model)?;
+        // The authenticated gateway is authoritative. Before its live catalog
+        // has hydrated, accept a non-empty model instead of intersecting it
+        // with the release-time curated catalog; this lets newly launched
+        // gateway models work in spawned/headless sessions immediately.
         Ok(canonical.to_string())
     }
 
@@ -441,6 +447,23 @@ mod tests {
                 "claude-fable-5",
             ]
         );
+    }
+
+    #[test]
+    fn unhydrated_catalog_defers_new_model_validation_to_gateway() {
+        let _guard = crate::storage::lock_test_env();
+        crate::subscription_catalog::clear_runtime_env();
+        let provider = DaanioProvider::new();
+
+        assert_eq!(
+            provider
+                .resolve_requested_model(" claude-opus-5 ")
+                .expect("new gateway model should pass before catalog hydration"),
+            "claude-opus-5"
+        );
+        assert!(provider.resolve_requested_model("   ").is_err());
+
+        crate::subscription_catalog::clear_runtime_env();
     }
 
     #[test]

@@ -45,33 +45,6 @@ struct PersistedModelCatalogScope {
     observed_at_unix_secs: u64,
 }
 
-#[cfg(test)]
-pub(crate) fn filtered_display_models(models: impl IntoIterator<Item = String>) -> Vec<String> {
-    models
-        .into_iter()
-        .filter(|model| {
-            !crate::subscription_catalog::is_runtime_mode_enabled()
-                || crate::subscription_catalog::is_curated_model(model)
-        })
-        .collect()
-}
-
-pub(crate) fn ensure_model_allowed_for_subscription(model: &str) -> Result<()> {
-    if !crate::subscription_catalog::is_runtime_mode_enabled() {
-        return Ok(());
-    }
-    match crate::subscription_catalog::find_curated_model(model) {
-        None => {
-            anyhow::bail!(
-                "Model '{}' is not included in the current daanio subscription catalog",
-                model
-            );
-        }
-        Some(_) => {}
-    }
-    Ok(())
-}
-
 /// Dynamic cache of model context window sizes, populated from API at startup.
 static CONTEXT_LIMIT_CACHE: std::sync::LazyLock<RwLock<HashMap<String, usize>>> =
     std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));

@@ -322,6 +322,19 @@ fn inherit_coordinator_selection(coordinator: &CoordinatorSpawnIdentity) -> Swar
     }
 }
 
+fn coordinator_uses_daanio_subscription(coordinator: &CoordinatorSpawnIdentity) -> bool {
+    coordinator
+        .route_api_method
+        .as_deref()
+        .is_some_and(|route| {
+            route.eq_ignore_ascii_case(crate::subscription_catalog::DAANIO_ROUTE_API_METHOD)
+        })
+        || coordinator.provider_key.as_deref().is_some_and(|key| {
+            key.eq_ignore_ascii_case("daanio")
+                || key.eq_ignore_ascii_case(crate::subscription_catalog::DAANIO_ROUTE_API_METHOD)
+        })
+}
+
 /// Selection for a concrete model string (optionally route-prefixed like
 /// `openai-api:gpt-5.5`), reconciled against the coordinator's identity.
 fn selection_for_concrete_model(
@@ -330,6 +343,23 @@ fn selection_for_concrete_model(
 ) -> SwarmSpawnSelection {
     if let Some(selection) = explicit_route_for_configured_model(&model) {
         return selection;
+    }
+
+    // A bare model selected from a Daanio subscription session remains on the
+    // managed Daanio route even when its name resembles an upstream provider's
+    // model. The gateway owns upstream routing; treating `gpt-*` as a direct
+    // OpenAI OAuth request produces a bogus `openai-oauth:` model prefix.
+    if coordinator_uses_daanio_subscription(coordinator) {
+        return SwarmSpawnSelection {
+            model: Some(model),
+            provider_key: coordinator
+                .provider_key
+                .clone()
+                .or_else(|| Some("daanio".to_string())),
+            route_api_method: Some(
+                crate::subscription_catalog::DAANIO_ROUTE_API_METHOD.to_string(),
+            ),
+        };
     }
 
     // A concrete model only inherits the coordinator's provider_key/route

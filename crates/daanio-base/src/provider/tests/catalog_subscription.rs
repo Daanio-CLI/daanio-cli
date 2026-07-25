@@ -242,91 +242,6 @@ fn test_provider_for_model_copilot_dot_notation() {
 }
 
 #[test]
-fn test_subscription_model_guard_allows_only_curated_models_when_enabled() {
-    let _guard = crate::storage::lock_test_env();
-    crate::subscription_catalog::clear_runtime_env();
-    crate::subscription_catalog::apply_runtime_env();
-
-    assert!(ensure_model_allowed_for_subscription("claude-opus-4-8").is_ok());
-    assert!(ensure_model_allowed_for_subscription("opus 4.8").is_ok());
-    assert!(ensure_model_allowed_for_subscription("claude-sonnet-4-6").is_ok());
-    assert!(ensure_model_allowed_for_subscription("sonnet 4.6").is_ok());
-    assert!(ensure_model_allowed_for_subscription("gpt-5.5").is_ok());
-    assert!(ensure_model_allowed_for_subscription("gpt-5.4").is_err());
-
-    crate::subscription_catalog::clear_runtime_env();
-}
-
-#[test]
-fn test_subscription_model_guard_does_not_enforce_cached_tiers() {
-    let _guard = crate::storage::lock_test_env();
-    let temp_home = tempfile::tempdir().expect("temp home");
-    crate::env::set_var("DAANIO_HOME", temp_home.path().to_string_lossy().to_string());
-    crate::env::remove_var(crate::subscription_catalog::DAANIO_TIER_ENV);
-    crate::subscription_catalog::clear_runtime_env();
-    crate::subscription_catalog::apply_runtime_env();
-
-    // Cached account metadata must not decide runtime model access. The
-    // authenticated gateway catalog is authoritative.
-    assert!(ensure_model_allowed_for_subscription("gpt-5.6-sol").is_ok());
-    assert!(ensure_model_allowed_for_subscription("claude-fable-5").is_ok());
-
-    // Changing the cached tier has no effect on client-side model selection.
-    crate::env::set_var(crate::subscription_catalog::DAANIO_TIER_ENV, "ultra");
-    assert!(ensure_model_allowed_for_subscription("claude-fable-5").is_ok());
-    assert!(ensure_model_allowed_for_subscription("sol").is_ok());
-
-    crate::env::remove_var(crate::subscription_catalog::DAANIO_TIER_ENV);
-    crate::env::remove_var("DAANIO_HOME");
-    crate::subscription_catalog::clear_runtime_env();
-}
-
-#[test]
-fn test_filtered_display_models_respects_curated_subscription_catalog() {
-    let _guard = crate::storage::lock_test_env();
-    let temp_home = tempfile::tempdir().expect("temp home");
-    crate::env::set_var("DAANIO_HOME", temp_home.path().to_string_lossy().to_string());
-    crate::env::remove_var(crate::subscription_catalog::DAANIO_TIER_ENV);
-    crate::subscription_catalog::clear_runtime_env();
-    crate::subscription_catalog::apply_runtime_env();
-
-    let filtered = filtered_display_models(vec![
-        "gpt-5.4".to_string(),
-        "claude-opus-4-8".to_string(),
-        "claude-sonnet-4-6".to_string(),
-        "gpt-5.5".to_string(),
-        "gpt-5.6-sol".to_string(),
-        "claude-fable-5".to_string(),
-    ]);
-
-    assert_eq!(
-        filtered,
-        vec![
-            "claude-opus-4-8".to_string(),
-            "claude-sonnet-4-6".to_string(),
-            "gpt-5.5".to_string(),
-            "gpt-5.6-sol".to_string(),
-            "claude-fable-5".to_string(),
-        ]
-    );
-
-    crate::env::set_var(crate::subscription_catalog::DAANIO_TIER_ENV, "ultra");
-    let filtered = filtered_display_models(vec![
-        "claude-fable-5".to_string(),
-        "gpt-5.6-sol".to_string(),
-        "gpt-5.4".to_string(),
-    ]);
-    assert_eq!(
-        filtered,
-        vec!["claude-fable-5".to_string(), "gpt-5.6-sol".to_string()]
-    );
-
-    crate::env::remove_var(crate::subscription_catalog::DAANIO_TIER_ENV);
-    crate::env::remove_var("DAANIO_HOME");
-    crate::subscription_catalog::clear_runtime_env();
-}
-
-#[test]
 fn test_remote_daanio_subscription_fallback_keeps_managed_route_identity() {
     let models = vec![
         "claude-opus-4-8".to_string(),
@@ -356,23 +271,4 @@ fn test_remote_daanio_subscription_fallback_keeps_managed_route_identity() {
             && route.api_method == crate::subscription_catalog::DAANIO_ROUTE_API_METHOD
             && route.available
     }));
-}
-
-#[test]
-fn test_subscription_filters_do_not_activate_from_saved_credentials_alone() {
-    let _guard = crate::storage::lock_test_env();
-    crate::subscription_catalog::clear_runtime_env();
-    crate::env::set_var(crate::subscription_catalog::DAANIO_API_KEY_ENV, "test-key");
-
-    assert!(ensure_model_allowed_for_subscription("gpt-5.4").is_ok());
-    assert_eq!(
-        filtered_display_models(vec![
-            "gpt-5.4".to_string(),
-            "claude-opus-4-8".to_string(),
-        ]),
-        vec!["gpt-5.4".to_string(), "claude-opus-4-8".to_string()]
-    );
-
-    crate::env::remove_var(crate::subscription_catalog::DAANIO_API_KEY_ENV);
-    crate::subscription_catalog::clear_runtime_env();
 }

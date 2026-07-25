@@ -647,6 +647,29 @@ fn resolve_swarm_spawn_model_daanio_subscription_allows_explicit_override() {
 }
 
 #[test]
+fn resolve_swarm_spawn_model_daanio_bare_override_stays_managed() {
+    let selection = resolve_swarm_spawn_selection(
+        Some("gpt-5.5".to_string()),
+        None,
+        &coordinator_identity(
+            Some("claude-opus-5"),
+            Some("daanio-subscription"),
+            Some("daanio-subscription"),
+        ),
+    );
+
+    assert_eq!(selection.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(
+        selection.provider_key.as_deref(),
+        Some("daanio-subscription")
+    );
+    assert_eq!(
+        selection.route_api_method.as_deref(),
+        Some("daanio-subscription")
+    );
+}
+
+#[test]
 fn resolve_swarm_spawn_model_daanio_prefix_is_normalized_without_coordinator_identity() {
     let selection = resolve_swarm_spawn_selection(
         Some("daanio-subscription:claude-fable-5".to_string()),
