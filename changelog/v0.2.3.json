@@ -1,0 +1,12 @@
+{
+  "version": "0.2.3",
+  "date": "2026-07-27",
+  "title": "Predictable swarm model inheritance",
+  "highlights": [
+    "New swarm workers now use the coordinator's currently selected model by default and automatically follow later model changes on subsequent spawns",
+    "Added separate installation and deployment guidance for the telemetry worker"
+  ],
+  "fixes": [
+    "Removed automatic task-based routing that unexpectedly switched swarm workers to Fable 5 or GPT-5.5 at low effort"
+  ]
+}
