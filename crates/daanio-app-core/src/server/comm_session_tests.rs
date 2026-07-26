@@ -724,6 +724,36 @@ fn resolve_swarm_spawn_model_inherit_sentinel_uses_coordinator_model() {
 }
 
 #[test]
+fn resolve_swarm_spawn_model_follows_coordinator_changes_between_spawns() {
+    let claude_selection = resolve_swarm_spawn_selection(
+        None,
+        None,
+        &coordinator_identity(
+            Some("claude-opus-5"),
+            Some("daanio"),
+            Some("daanio-subscription"),
+        ),
+    );
+    let gpt_selection = resolve_swarm_spawn_selection(
+        None,
+        None,
+        &coordinator_identity(
+            Some("gpt-5.6-sol"),
+            Some("daanio"),
+            Some("daanio-subscription"),
+        ),
+    );
+
+    assert_eq!(claude_selection.model.as_deref(), Some("claude-opus-5"));
+    assert_eq!(gpt_selection.model.as_deref(), Some("gpt-5.6-sol"));
+    assert_eq!(gpt_selection.provider_key.as_deref(), Some("daanio"));
+    assert_eq!(
+        gpt_selection.route_api_method.as_deref(),
+        Some("daanio-subscription")
+    );
+}
+
+#[test]
 fn resolve_swarm_spawn_model_requested_model_overrides_configured_pin() {
     // A per-spawn requested model must beat the agents.swarm_model config pin.
     let selection = resolve_swarm_spawn_selection(

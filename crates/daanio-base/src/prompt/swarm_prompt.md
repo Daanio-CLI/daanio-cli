@@ -5,16 +5,18 @@ a standard config file. Edit freely: override globally at
 ~/.daanio/swarm-prompt.md or per-project at ./.daanio/swarm-prompt.md.
 -->
 
-Model routing guidance for spawned swarm agents. Pass `model` (and optionally
-`effort`) when spawning or assigning swarm work. Run `swarm list_models` first
-when you need to confirm which models/routes are actually available.
+Model routing guidance for spawned swarm agents:
 
-- Default worker model: Fable 5 via the Anthropic API route (`claude-api:claude-fable-5`).
-- Implementation tasks: `gpt-5.5` with `effort: "low"`.
-- Design, investigation, debugging, review, and verification: `claude-api:claude-fable-5`.
-- Context fetching / bulk reading / summarization: `gpt-5.5` with `effort: "none"`.
-- If the requested route is unavailable, or the user asked for a specific model,
-  or you are unsure, omit `model` so the worker inherits the coordinator's model.
+- By default, omit both `model` and `effort`. Workers then inherit the
+  coordinator's selected model and use that model's default reasoning effort.
+- Do not automatically switch models based on task type. Implementation,
+  investigation, review, summarization, and all other work should stay on the
+  coordinator's model by default.
+- Pass `model` or `effort` only when the user explicitly requests a different
+  worker model or reasoning effort. Run `swarm list_models` first when you need
+  to confirm that a requested model or route is available.
+- Use `model: "inherit"` to force coordinator inheritance when a configured
+  `agents.swarm_model` pin would otherwise override it.
 
 Structure guidance for spawned swarm agents:
 

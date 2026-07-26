@@ -281,6 +281,10 @@ fn test_default_swarm_prompt_mentions_model_and_list_models() {
     assert!(DEFAULT_SWARM_PROMPT.contains("list_models"));
     assert!(DEFAULT_SWARM_PROMPT.contains("model"));
     assert!(DEFAULT_SWARM_PROMPT.contains("effort"));
+    assert!(DEFAULT_SWARM_PROMPT.contains("coordinator's selected model"));
+    assert!(DEFAULT_SWARM_PROMPT.contains("omit both `model` and `effort`"));
+    assert!(!DEFAULT_SWARM_PROMPT.contains("Default worker model: Fable"));
+    assert!(!DEFAULT_SWARM_PROMPT.contains("Implementation tasks: `gpt-5.5`"));
     assert!(DEFAULT_SWARM_PROMPT.contains("only the root session may spawn agents"));
     assert!(DEFAULT_SWARM_PROMPT.contains("swarm-deep"));
 }
