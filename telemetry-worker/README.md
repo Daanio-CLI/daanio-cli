@@ -2,6 +2,9 @@
 
 Cloudflare Worker that receives anonymous telemetry events from daanio.
 
+For operator prerequisites, local setup, and first-time Cloudflare
+provisioning, see the [Telemetry Worker Installation Guide](./INSTALLATION.md).
+
 For production setup, migration, verification, and rollback instructions, see
 the [Telemetry Worker Deployment Runbook](./DEPLOYMENT.md).
 

@@ -46,7 +46,7 @@ From the repository root:
 
 ```bash
 cd telemetry-worker
-npm ci
+npm install
 npx wrangler whoami
 ```
 
@@ -75,12 +75,15 @@ git diff HEAD^ -- src/ migrations/ schema.sql wrangler.toml package.json
 Do not deploy from a dirty checkout unless every uncommitted change is intended
 for production.
 
-### 2. Install locked dependencies and run tests
+### 2. Install dependencies and run tests
 
 ```bash
-npm ci
+npm install
 npm test
 ```
+
+The worker currently has no committed package lock, so `npm ci` is not
+available. See [INSTALLATION.md](./INSTALLATION.md) for dependency setup.
 
 Stop if tests fail.
 
@@ -329,7 +332,7 @@ feedback text.
 ## Deployment checklist
 
 - [ ] Intended Git commit selected and worktree reviewed
-- [ ] `npm ci` completed
+- [ ] `npm install` completed
 - [ ] `npm test` passed
 - [ ] Required remote D1 migrations applied in order
 - [ ] `npm run deploy` completed and deployment ID recorded
