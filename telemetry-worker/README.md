@@ -2,6 +2,9 @@
 
 Cloudflare Worker that receives anonymous telemetry events from daanio.
 
+For production setup, migration, verification, and rollback instructions, see
+the [Telemetry Worker Deployment Runbook](./DEPLOYMENT.md).
+
 The headline number is **Total users**: distinct, non-CI `telemetry_id`s that
 ever installed daanio OR did meaningful work in it. Run it with:
 
