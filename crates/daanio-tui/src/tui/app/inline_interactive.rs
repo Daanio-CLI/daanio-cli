@@ -3244,7 +3244,7 @@ impl App {
                             // to it does not reach the server. Stage it so the
                             // remote dispatcher forwards it right after the
                             // model switch; otherwise the server keeps its
-                            // configured default (low) and silently runs e.g.
+                            // configured default and silently runs e.g.
                             // "gpt-5.5 (high)" at low effort (issue #427).
                             self.pending_reasoning_effort = effort.clone();
                         } else {

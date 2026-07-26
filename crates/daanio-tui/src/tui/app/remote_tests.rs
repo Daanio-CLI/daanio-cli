@@ -979,7 +979,7 @@ fn remote_history_watchdog_advises_restart_after_giving_up() {
 /// "gpt-5.5 (high)") in remote mode must forward the chosen effort to the
 /// server after the model-switch request. Previously the effort was applied
 /// only to the local stand-in provider, so the server kept its configured
-/// default (low by default) and silently ran the new model at low effort.
+/// configured default and silently ran the new model at that effort.
 #[test]
 fn forward_pending_reasoning_effort_sends_effort_request_to_server() {
     use tokio::io::AsyncBufReadExt;

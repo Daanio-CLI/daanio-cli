@@ -1,0 +1,12 @@
+{
+  "version": "0.2.2",
+  "date": "2026-07-26",
+  "title": "Reliable swarm routing with stronger defaults",
+  "highlights": [
+    "Swarm workers now inherit the Daanio gateway route and accept newly available models without being blocked by a stale local catalog",
+    "New configurations default OpenAI reasoning effort to high"
+  ],
+  "fixes": [
+    "Explicit swarm model overrides no longer receive an incorrect direct-provider prefix when launched from a Daanio gateway session"
+  ]
+}

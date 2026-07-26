@@ -15,10 +15,10 @@ fn restore_env_var(key: &str, previous: Option<OsString>) {
 }
 
 #[test]
-fn test_openai_reasoning_effort_defaults_to_low() {
+fn test_openai_reasoning_effort_defaults_to_high() {
     assert_eq!(
         ProviderConfig::default().openai_reasoning_effort.as_deref(),
-        Some("low")
+        Some("high")
     );
 }
 
@@ -460,7 +460,7 @@ fn tool_config_disabled_only_keeps_full_profile_with_deny_list() {
 }
 
 #[test]
-fn test_generated_default_config_uses_low_openai_reasoning_effort() {
+fn test_generated_default_config_uses_high_openai_reasoning_effort() {
     let _guard = crate::storage::lock_test_env();
     let prev_home = std::env::var_os("DAANIO_HOME");
     let dir = tempfile::TempDir::new().expect("tempdir");
@@ -470,8 +470,8 @@ fn test_generated_default_config_uses_low_openai_reasoning_effort() {
     let content = std::fs::read_to_string(path).expect("read default config file");
 
     assert!(
-        content.contains("openai_reasoning_effort = \"low\""),
-        "generated default config should use low OpenAI reasoning effort"
+        content.contains("openai_reasoning_effort = \"high\""),
+        "generated default config should use high OpenAI reasoning effort"
     );
     assert!(
         content.contains("openai_service_tier = \"priority\""),

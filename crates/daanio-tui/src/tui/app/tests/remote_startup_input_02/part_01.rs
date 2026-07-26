@@ -1655,7 +1655,7 @@ fn test_handle_input_shell_completed_renders_markdown_blocks() {
 /// Regression for issue #427: selecting an effort-variant model row (e.g.
 /// "gpt-5.5 (high)") in the remote model picker must stage the chosen effort
 /// alongside the pending model switch. Previously only the model spec was
-/// staged, so the server kept its configured default effort (low) and the
+/// staged, so the server kept its configured default effort and the
 /// session silently ran gpt-5.5 at low effort.
 #[test]
 fn test_model_picker_effort_variant_selection_stages_effort_in_remote_mode() {

@@ -1296,7 +1296,7 @@ pub struct App {
     // Reasoning-effort variant chosen together with a model in the picker
     // (e.g. "gpt-5.5 (high)"), staged for remote mode alongside the model
     // switch. Without forwarding this to the server, it keeps its configured
-    // default effort (low by default) and silently runs the newly selected
+    // configured default effort and silently runs the newly selected
     // model at the wrong effort (issue #427).
     pending_reasoning_effort: Option<String>,
     // Remote SetModel has been sent but ModelChanged has not arrived yet. User
