@@ -2,6 +2,7 @@ use super::{connect_socket, debug_socket_path, socket_path};
 use crate::protocol::{HistoryMessage, Request, ServerEvent, TranscriptMode};
 use crate::transport::{ReadHalf, WriteHalf};
 use anyhow::Result;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -10,6 +11,7 @@ pub struct Client {
     reader: BufReader<ReadHalf>,
     writer: WriteHalf,
     next_id: u64,
+    pending_events: VecDeque<ServerEvent>,
 }
 
 impl Client {
@@ -24,6 +26,7 @@ impl Client {
             reader: BufReader::new(reader),
             writer,
             next_id: 1,
+            pending_events: VecDeque::new(),
         })
     }
 
@@ -38,6 +41,7 @@ impl Client {
             reader: BufReader::new(reader),
             writer,
             next_id: 1,
+            pending_events: VecDeque::new(),
         })
     }
 
@@ -95,6 +99,9 @@ impl Client {
 
     /// Read the next event from the server
     pub async fn read_event(&mut self) -> Result<ServerEvent> {
+        if let Some(event) = self.pending_events.pop_front() {
+            return Ok(event);
+        }
         let mut line = String::new();
         let n = self.reader.read_line(&mut line).await?;
         if n == 0 {
@@ -171,7 +178,7 @@ impl Client {
         let request = Request::GetHistory { id };
         let json = serde_json::to_string(&request)? + "\n";
         self.writer.write_all(json.as_bytes()).await?;
-        for _ in 0..10 {
+        for _ in 0..100 {
             let mut line = String::new();
             let n = self.reader.read_line(&mut line).await?;
             if n == 0 {
@@ -179,8 +186,15 @@ impl Client {
             }
             let event: ServerEvent = serde_json::from_str(&line)?;
             match event {
-                ServerEvent::Ack { .. } => continue,
-                _ => return Ok(event),
+                ServerEvent::History { id: history_id, .. } if history_id == id => {
+                    return Ok(event);
+                }
+                ServerEvent::Error { id: error_id, .. } if error_id == id => return Ok(event),
+                ServerEvent::Ack { id: ack_id } if ack_id == id => continue,
+                // Broadcasts and responses for other in-flight requests may
+                // legally interleave with this response. Preserve them for
+                // the caller instead of mistaking one for GetHistory.
+                other => self.pending_events.push_back(other),
             }
         }
 
