@@ -1,0 +1,9 @@
+{
+  "version": "0.2.4",
+  "date": "2026-07-27",
+  "title": "Accurate model context windows",
+  "fixes": [
+    "The context meter and compaction budget now use context lengths advertised by the authenticated Daanio model catalog instead of falling back to 200K",
+    "Claude Opus 5 is now recognized as a native 1M-context model"
+  ]
+}

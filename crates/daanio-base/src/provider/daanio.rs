@@ -545,18 +545,30 @@ mod tests {
     }
 
     #[test]
-    fn live_catalog_context_length_overrides_static_fallback() {
+    fn live_catalog_context_lengths_follow_every_selected_model() {
         let _guard = crate::storage::lock_test_env();
         crate::subscription_catalog::clear_runtime_env();
         let provider = DaanioProvider::new();
 
-        provider.store_live_models(vec![crate::subscription_api::AvailableModel {
-            id: "qwen3-coder-next".to_string(),
-            context_length: Some(1_000_000),
-        }]);
+        provider.store_live_models(vec![
+            crate::subscription_api::AvailableModel {
+                id: "gpt-5.6-sol".to_string(),
+                context_length: Some(500_000),
+            },
+            crate::subscription_api::AvailableModel {
+                id: "gpt-5.5".to_string(),
+                context_length: Some(333_000),
+            },
+        ]);
 
-        assert_eq!(provider.model(), "qwen3-coder-next");
-        assert_eq!(provider.context_window(), 1_000_000);
+        assert_eq!(provider.model(), "gpt-5.6-sol");
+        assert_eq!(provider.context_window(), 500_000);
+
+        *provider
+            .selected_model
+            .write()
+            .expect("selected model lock") = "gpt-5.5".to_string();
+        assert_eq!(provider.context_window(), 333_000);
         crate::subscription_catalog::clear_runtime_env();
     }
 
