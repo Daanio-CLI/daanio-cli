@@ -200,6 +200,14 @@ struct ModelCatalogWire {
 #[derive(Debug, Deserialize)]
 struct ModelCatalogEntryWire {
     id: String,
+    #[serde(default)]
+    context_length: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AvailableModel {
+    pub id: String,
+    pub context_length: Option<usize>,
 }
 
 pub fn configured_api_base() -> String {
@@ -388,11 +396,11 @@ pub async fn fetch_subscription_me_with(
 
 /// Fetch the models currently advertised to this Daanio credential. The
 /// authenticated gateway catalog is authoritative for runtime availability.
-pub async fn fetch_available_models_with(
+pub(crate) async fn fetch_available_models_with(
     client: &reqwest::Client,
     api_base: &str,
     api_key: &str,
-) -> std::result::Result<Vec<String>, AccountApiError> {
+) -> std::result::Result<Vec<AvailableModel>, AccountApiError> {
     let response = client
         .get(endpoint_url(api_base, "models"))
         .bearer_auth(api_key)
@@ -418,8 +426,14 @@ pub async fn fetch_available_models_with(
     let mut models = Vec::new();
     for entry in wire.data {
         let id = entry.id.trim();
-        if !id.is_empty() && !models.iter().any(|model| model == id) {
-            models.push(id.to_string());
+        if !id.is_empty() && !models.iter().any(|model: &AvailableModel| model.id == id) {
+            models.push(AvailableModel {
+                id: id.to_string(),
+                context_length: entry
+                    .context_length
+                    .filter(|limit| *limit > 0)
+                    .and_then(|limit| usize::try_from(limit).ok()),
+            });
         }
     }
     Ok(models)
@@ -653,12 +667,28 @@ mod tests {
         let base = spawn_server(vec![(
             200,
             vec![],
-            r#"{"object":"list","success":true,"data":[{"id":"gpt-5.6-sol"},{"id":" gpt-5.6-sol "},{"id":"qwen3-coder-next"},{"id":""}]}"#.to_string(),
+            r#"{"object":"list","success":true,"data":[{"id":"gpt-5.6-sol","context_length":272000},{"id":" gpt-5.6-sol ","context_length":999999},{"id":"claude-opus-5","context_length":1000000},{"id":"qwen3-coder-next","context_length":0},{"id":""}]}"#.to_string(),
         )]);
         let models = fetch_available_models_with(&client(), &base, "browser-issued-key")
             .await
             .expect("models");
-        assert_eq!(models, vec!["gpt-5.6-sol", "qwen3-coder-next"]);
+        assert_eq!(
+            models,
+            vec![
+                AvailableModel {
+                    id: "gpt-5.6-sol".to_string(),
+                    context_length: Some(272_000),
+                },
+                AvailableModel {
+                    id: "claude-opus-5".to_string(),
+                    context_length: Some(1_000_000),
+                },
+                AvailableModel {
+                    id: "qwen3-coder-next".to_string(),
+                    context_length: None,
+                },
+            ]
+        );
     }
 
     #[tokio::test]

@@ -185,6 +185,7 @@ pub fn provider_for_model(model: &str) -> Option<&'static str> {
 /// covered, while unknown/future Claude ids fall through to the dynamic cache.
 fn base_is_known_claude_model(base: &str) -> bool {
     const KNOWN_CLAUDE_PREFIXES: &[&str] = &[
+        "claude-opus-5",
         "claude-opus-4-8",
         "claude-opus-4.8",
         "claude-opus-4-7",
@@ -501,8 +502,20 @@ mod tests {
     }
 
     #[test]
+    fn context_limit_classifies_claude_opus_5_as_native_1m() {
+        assert_eq!(
+            context_limit_for_model_with_provider("claude-opus-5", Some("claude")),
+            Some(1_000_000)
+        );
+    }
+
+    #[test]
     fn anthropic_context_mode_classifications() {
         use crate::anthropic::{AnthropicContextMode, anthropic_context_mode};
+        assert_eq!(
+            anthropic_context_mode("claude-opus-5"),
+            AnthropicContextMode::Native1M
+        );
         assert_eq!(
             anthropic_context_mode("claude-opus-4-8"),
             AnthropicContextMode::Native1M

@@ -2,6 +2,7 @@ use super::{EventStream, ModelRoute, MultiProvider, NativeToolResultSender, Prov
 use crate::message::{Message, ToolDefinition};
 use anyhow::Result;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 pub struct DaanioProvider {
@@ -10,6 +11,9 @@ pub struct DaanioProvider {
     /// `None` until the authenticated gateway catalog has been fetched. Once
     /// hydrated, including with an empty list, the server is authoritative.
     live_models: Arc<RwLock<Option<Vec<String>>>>,
+    /// Context limits advertised alongside `live_models` by the authenticated
+    /// gateway catalog, keyed by model id.
+    live_context_limits: Arc<RwLock<HashMap<String, usize>>>,
 }
 
 impl DaanioProvider {
@@ -23,6 +27,7 @@ impl DaanioProvider {
             inner,
             selected_model: Arc::new(RwLock::new(default_model)),
             live_models: Arc::new(RwLock::new(None)),
+            live_context_limits: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -79,13 +84,24 @@ impl DaanioProvider {
             .unwrap_or_default()
     }
 
-    fn store_live_models(&self, advertised: Vec<String>) {
+    fn store_live_models(&self, advertised: Vec<crate::subscription_api::AvailableModel>) {
         // `/v1/models` is authenticated with the browser-issued, revocable
         // account credential, so its response is the authority for this
         // account. Keep its chat-capable models without intersecting them with
         // the release-time curated catalog; the backend can add or remove
         // models without requiring a CLI build.
-        let models = Self::normalize_advertised_models(&advertised);
+        let advertised_ids: Vec<String> = advertised.iter().map(|model| model.id.clone()).collect();
+        let models = Self::normalize_advertised_models(&advertised_ids);
+        let allowed: std::collections::HashSet<&str> = models.iter().map(String::as_str).collect();
+        let context_limits = advertised
+            .into_iter()
+            .filter(|model| allowed.contains(model.id.trim()))
+            .filter_map(|model| {
+                model
+                    .context_length
+                    .map(|limit| (model.id.trim().to_ascii_lowercase(), limit))
+            })
+            .collect();
         let selected = self.model();
         let replacement = if models.iter().any(|model| model == &selected) {
             None
@@ -101,6 +117,10 @@ impl DaanioProvider {
             .live_models
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(models);
+        *self
+            .live_context_limits
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = context_limits;
         if let Some(model) = replacement {
             let _ = self.inner.set_model(&model);
             if let Ok(mut selected_model) = self.selected_model.write() {
@@ -149,7 +169,10 @@ impl DaanioProvider {
         self.store_live_models(
             advertised
                 .iter()
-                .map(|model| (*model).to_string())
+                .map(|model| crate::subscription_api::AvailableModel {
+                    id: (*model).to_string(),
+                    context_length: None,
+                })
                 .collect(),
         );
     }
@@ -270,6 +293,10 @@ impl Provider for DaanioProvider {
             .live_models
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        self.live_context_limits
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
         self.inner.on_auth_changed();
         let selected_model = self.model();
         let _ = self.inner.set_model(&selected_model);
@@ -351,7 +378,12 @@ impl Provider for DaanioProvider {
     }
 
     fn context_window(&self) -> usize {
-        self.inner.context_window()
+        self.live_context_limits
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&self.model().trim().to_ascii_lowercase())
+            .copied()
+            .unwrap_or_else(|| self.inner.context_window())
     }
 
     fn fork(&self) -> Arc<dyn Provider> {
@@ -362,6 +394,14 @@ impl Provider for DaanioProvider {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = self
             .live_models
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        *forked
+            .live_context_limits
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = self
+            .live_context_limits
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
@@ -501,6 +541,22 @@ mod tests {
         assert!(provider.available_models_display().is_empty());
         assert!(provider.model_routes().is_empty());
         assert!(provider.set_model("gpt-5.5").is_err());
+        crate::subscription_catalog::clear_runtime_env();
+    }
+
+    #[test]
+    fn live_catalog_context_length_overrides_static_fallback() {
+        let _guard = crate::storage::lock_test_env();
+        crate::subscription_catalog::clear_runtime_env();
+        let provider = DaanioProvider::new();
+
+        provider.store_live_models(vec![crate::subscription_api::AvailableModel {
+            id: "qwen3-coder-next".to_string(),
+            context_length: Some(1_000_000),
+        }]);
+
+        assert_eq!(provider.model(), "qwen3-coder-next");
+        assert_eq!(provider.context_window(), 1_000_000);
         crate::subscription_catalog::clear_runtime_env();
     }
 
