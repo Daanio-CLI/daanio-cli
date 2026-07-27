@@ -137,6 +137,18 @@ jobs:
           cd dist && tar czf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
 
       - name: Upload artifact
+        id: upload-artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.tar.gz
+
+      # GitHub's artifact service occasionally returns transient DNS/network
+      # failures after a platform binary has built successfully. Retry once so
+      # an ENOTFOUND does not discard an otherwise valid release target.
+      - name: Retry artifact upload
+        if: steps.upload-artifact.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
