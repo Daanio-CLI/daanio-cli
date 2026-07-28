@@ -19,6 +19,18 @@ fn local_endpoint_troubleshooting_hint(api_base: &str, model: &str) -> &'static 
     "Hint: check network connectivity, DNS/TLS, that the base URL includes the API version (usually /v1), and that the model exists on the provider."
 }
 
+fn selected_reasoning_effort(request: &Value) -> Option<&str> {
+    request
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            request
+                .get("reasoning")
+                .and_then(|reasoning| reasoning.get("effort"))
+                .and_then(Value::as_str)
+        })
+}
+
 // ============================================================================
 // SSE Stream Parser
 // ============================================================================
@@ -187,6 +199,9 @@ async fn stream_response(
             .header("HTTP-Referer", "https://github.com/1jehuang/jcode")
             .header("X-Title", "daanio");
     }
+    if let Some(effort) = selected_reasoning_effort(&request) {
+        req = req.header("X-Daanio-Reasoning-Effort", effort);
+    }
 
     let response = req
         .json(&request)
@@ -338,6 +353,18 @@ mod tests {
         assert!(hint.contains("LM Studio"));
         assert!(hint.contains("Local Server"));
         assert!(hint.contains("/v1/models"));
+    }
+
+    #[test]
+    fn selected_effort_reads_openai_compatible_field() {
+        let request = serde_json::json!({"reasoning_effort": "xhigh"});
+        assert_eq!(selected_reasoning_effort(&request), Some("xhigh"));
+    }
+
+    #[test]
+    fn selected_effort_reads_unified_reasoning_field() {
+        let request = serde_json::json!({"reasoning": {"effort": "low"}});
+        assert_eq!(selected_reasoning_effort(&request), Some("low"));
     }
 
     #[test]
