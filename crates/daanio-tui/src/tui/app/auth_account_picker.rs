@@ -21,7 +21,10 @@ impl App {
                     return;
                 }
             },
-            None => crate::provider_catalog::login_providers().to_vec(),
+            // Public Daanio builds expose only the first-party account. Keep
+            // the complete metadata catalog available to the internal gateway
+            // runtimes, but never turn it into user-facing account actions.
+            None => crate::provider_catalog::tui_login_providers(),
         };
 
         let mut items = Vec::new();
@@ -35,11 +38,13 @@ impl App {
         let provider_scope = provider_filter.map(|value| value.to_string());
         let claude_accounts = crate::auth::claude::list_accounts().unwrap_or_default();
         let openai_accounts = crate::auth::codex::list_accounts().unwrap_or_default();
-        let add_replace_scope_supports_multi_account = match provider_scope.as_deref() {
-            None => true,
-            Some("claude" | "anthropic" | "openai") => true,
-            Some(_) => false,
-        };
+        let add_replace_scope_supports_multi_account =
+            std::env::var_os("DAANIO_FIRST_PARTY_ONLY").is_none()
+                && match provider_scope.as_deref() {
+                    None => true,
+                    Some("claude" | "anthropic" | "openai") => true,
+                    Some(_) => false,
+                };
 
         if add_replace_scope_supports_multi_account {
             let scoped_saved_accounts = match provider_scope.as_deref() {
@@ -433,6 +438,9 @@ impl App {
     }
 
     pub(crate) fn should_open_inline_account_picker(&self, provider_filter: Option<&str>) -> bool {
+        if std::env::var_os("DAANIO_FIRST_PARTY_ONLY").is_some() {
+            return false;
+        }
         provider_filter.is_none()
             || self
                 .inline_account_picker_scope_key(provider_filter)

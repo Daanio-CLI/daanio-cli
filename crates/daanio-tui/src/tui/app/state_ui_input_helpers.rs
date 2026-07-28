@@ -184,9 +184,9 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/workspace", "Niri-style session workspace"),
     RegisteredCommand::public("/quit", "Exit daanio"),
     RegisteredCommand::public("/auth", "Show authentication status"),
-    RegisteredCommand::public("/login", "Login to a provider"),
-    RegisteredCommand::public("/logout", "Log out of a provider"),
-    RegisteredCommand::public("/account", "Open the combined account picker"),
+    RegisteredCommand::public("/login", "Sign in securely through Daanio"),
+    RegisteredCommand::public("/logout", "Sign out of Daanio"),
+    RegisteredCommand::public("/account", "Open Daanio account settings"),
     RegisteredCommand::public("/accounts", "Alias for /account"),
     RegisteredCommand::public("/cache", "Show cache stats or set cache TTL"),
     RegisteredCommand::public("/debug-visual", "Toggle visual debug overlay"),
@@ -795,6 +795,34 @@ impl App {
         }
 
         if prefix.starts_with("/account ") || prefix.starts_with("/accounts ") {
+            if std::env::var_os("DAANIO_FIRST_PARTY_ONLY").is_some() {
+                return self.rank_suggestions(
+                    input,
+                    vec![
+                        ("/account daanio".into(), "Open Daanio account actions"),
+                        (
+                            "/account daanio status".into(),
+                            "Show Daanio subscription status",
+                        ),
+                        (
+                            "/account daanio login".into(),
+                            "Sign in securely through Daanio",
+                        ),
+                        (
+                            "/account daanio manage".into(),
+                            "Open Daanio account management",
+                        ),
+                        (
+                            "/account daanio logout".into(),
+                            "Sign out of the Daanio account",
+                        ),
+                        (
+                            "/account default-model".into(),
+                            "Set the preferred Daanio model",
+                        ),
+                    ],
+                );
+            }
             let mut suggestions = vec![
                 ("/account list".into(), "Open all provider/account actions"),
                 ("/account switch".into(), "Switch active account by label"),

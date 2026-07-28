@@ -136,7 +136,10 @@ impl Provider for OpenRouterProvider {
                     request["reasoning_effort"] = serde_json::json!(effort);
                     sent_reasoning_config = true;
                 }
-            } else if self.supports_openai_reasoning_effort() {
+            } else if self.supports_openai_reasoning_effort()
+                || self.supports_gemini_reasoning_effort()
+                || self.supports_xai_reasoning_effort()
+            {
                 // GPT-family models on direct compat gateways (e.g. OpenCode
                 // Zen serving gpt-5.3-codex-spark) take the standard OpenAI
                 // `reasoning_effort` field with OpenAI's effort vocabulary.
@@ -449,6 +452,8 @@ impl Provider for OpenRouterProvider {
         let mut accepted = self.available_efforts().contains(&requested.as_str());
         if !self.supports_deepseek_reasoning_effort()
             && !self.supports_openai_reasoning_effort()
+            && !self.supports_gemini_reasoning_effort()
+            && !self.supports_xai_reasoning_effort()
             && requested == "max"
         {
             accepted = true;
@@ -471,6 +476,10 @@ impl Provider for OpenRouterProvider {
     fn available_efforts(&self) -> Vec<&'static str> {
         if self.supports_deepseek_reasoning_effort() {
             daanio_provider_core::DEEPSEEK_SELECTABLE_EFFORTS.to_vec()
+        } else if self.supports_gemini_reasoning_effort() {
+            daanio_provider_core::GEMINI_SELECTABLE_EFFORTS.to_vec()
+        } else if self.supports_xai_reasoning_effort() {
+            daanio_provider_core::XAI_SELECTABLE_EFFORTS.to_vec()
         } else if self.supports_openai_reasoning_effort() {
             daanio_provider_core::OPENAI_SELECTABLE_EFFORTS.to_vec()
         } else if Self::profile_supports_unified_reasoning(

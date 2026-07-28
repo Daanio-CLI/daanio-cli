@@ -1,0 +1,14 @@
+{
+  "version": "0.2.9",
+  "date": "2026-07-28",
+  "title": "Daanio-exclusive subscription parity",
+  "fixes": [
+    "Daanio subscription now delegates image-input capability from the active model runtime",
+    "Daanio subscription now delegates service-tier capability instead of hiding it at the wrapper",
+    "Gemini reasoning selections are now applied to outgoing subscription API requests",
+    "xAI Grok reasoning selections are now applied to outgoing subscription API requests",
+    "Each reasoning family validates only the effort levels accepted by its upstream API",
+    "Account, login, logout, and command suggestions now expose only the Daanio gateway",
+    "Custom and upstream-provider credentials remain unavailable while internal gateway protocol support is preserved"
+  ]
+}

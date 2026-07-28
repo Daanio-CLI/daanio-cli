@@ -1026,6 +1026,15 @@ impl OpenRouterProvider {
             || model.starts_with("o5")
     }
 
+    fn model_is_gemini_reasoning_family(model: &str) -> bool {
+        model.trim().to_ascii_lowercase().starts_with("gemini-")
+    }
+
+    fn model_is_xai_reasoning_family(model: &str) -> bool {
+        let model = model.trim().to_ascii_lowercase();
+        model.starts_with("grok-3-mini") || model.starts_with("grok-4")
+    }
+
     /// Does this runtime accept the OpenAI-style `reasoning_effort` field for
     /// the active model? Only for direct compat endpoints serving GPT-family
     /// reasoning models, and only when no explicit config override or
@@ -1040,6 +1049,24 @@ impl OpenRouterProvider {
         ) && Self::model_is_openai_reasoning_family(&self.model_snapshot())
     }
 
+    pub(crate) fn supports_gemini_reasoning_effort(&self) -> bool {
+        self.reasoning_effort_support != Some(false)
+            && !Self::profile_supports_unified_reasoning(
+                self.profile_id.as_deref(),
+                self.send_openrouter_headers,
+            )
+            && Self::model_is_gemini_reasoning_family(&self.model_snapshot())
+    }
+
+    pub(crate) fn supports_xai_reasoning_effort(&self) -> bool {
+        self.reasoning_effort_support != Some(false)
+            && !Self::profile_supports_unified_reasoning(
+                self.profile_id.as_deref(),
+                self.send_openrouter_headers,
+            )
+            && Self::model_is_xai_reasoning_family(&self.model_snapshot())
+    }
+
     fn model_snapshot(&self) -> String {
         self.model
             .try_read()
@@ -1050,6 +1077,8 @@ impl OpenRouterProvider {
     pub(crate) fn supports_any_reasoning_effort(&self) -> bool {
         self.supports_deepseek_reasoning_effort()
             || self.supports_openai_reasoning_effort()
+            || self.supports_gemini_reasoning_effort()
+            || self.supports_xai_reasoning_effort()
             || Self::profile_supports_unified_reasoning(
                 self.profile_id.as_deref(),
                 self.send_openrouter_headers,
@@ -1059,6 +1088,10 @@ impl OpenRouterProvider {
     pub(crate) fn normalize_reasoning_effort_for_self(&self, effort: &str) -> Option<String> {
         if self.supports_deepseek_reasoning_effort() {
             Self::normalize_reasoning_effort(effort)
+        } else if self.supports_gemini_reasoning_effort() {
+            Self::normalize_gemini_reasoning_effort(effort)
+        } else if self.supports_xai_reasoning_effort() {
+            Self::normalize_xai_reasoning_effort(effort)
         } else if self.supports_openai_reasoning_effort() {
             Self::normalize_openai_reasoning_effort(effort)
         } else {
@@ -1137,6 +1170,19 @@ impl OpenRouterProvider {
         }
     }
 
+    fn normalize_gemini_reasoning_effort(raw: &str) -> Option<String> {
+        let value = raw.trim().to_ascii_lowercase();
+        daanio_provider_core::GEMINI_SELECTABLE_EFFORTS
+            .contains(&value.as_str())
+            .then_some(value)
+    }
+
+    fn normalize_xai_reasoning_effort(raw: &str) -> Option<String> {
+        let value = raw.trim().to_ascii_lowercase();
+        daanio_provider_core::XAI_SELECTABLE_EFFORTS
+            .contains(&value.as_str())
+            .then_some(value)
+    }
     fn normalize_unified_reasoning_effort(raw: &str) -> Option<String> {
         let value = raw.trim().to_ascii_lowercase();
         if value.is_empty() {

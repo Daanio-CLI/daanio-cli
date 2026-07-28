@@ -2804,6 +2804,26 @@ fn compat_profile_serving_gpt_family_model_supports_reasoning_effort() {
 }
 
 #[test]
+fn compat_profile_uses_model_specific_gemini_and_xai_efforts() {
+    let provider = make_custom_compatible_provider();
+
+    provider.set_model("gemini-2.5-pro").unwrap();
+    assert_eq!(
+        provider.available_efforts(),
+        vec!["minimal", "low", "medium", "high"]
+    );
+    provider.set_reasoning_effort("medium").unwrap();
+    assert_eq!(provider.reasoning_effort().as_deref(), Some("medium"));
+    assert!(provider.set_reasoning_effort("xhigh").is_err());
+
+    provider.set_model("grok-4").unwrap();
+    assert_eq!(provider.available_efforts(), vec!["low", "high"]);
+    provider.set_reasoning_effort("low").unwrap();
+    assert_eq!(provider.reasoning_effort().as_deref(), Some("low"));
+    assert!(provider.set_reasoning_effort("medium").is_err());
+}
+
+#[test]
 fn compatible_model_switch_clears_an_effort_invalid_for_the_new_vocabulary() {
     let provider = make_custom_compatible_provider();
     provider.set_model("gpt-5.5").unwrap();

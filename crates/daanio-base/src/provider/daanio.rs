@@ -306,6 +306,10 @@ impl Provider for DaanioProvider {
         self.inner.auth_model_refresh_pending()
     }
 
+    fn supports_image_input(&self) -> bool {
+        self.inner.supports_image_input()
+    }
+
     fn reasoning_effort(&self) -> Option<String> {
         self.inner.reasoning_effort()
     }
@@ -316,6 +320,18 @@ impl Provider for DaanioProvider {
 
     fn available_efforts(&self) -> Vec<&'static str> {
         self.inner.available_efforts()
+    }
+
+    fn service_tier(&self) -> Option<String> {
+        self.inner.service_tier()
+    }
+
+    fn set_service_tier(&self, service_tier: &str) -> Result<()> {
+        self.inner.set_service_tier(service_tier)
+    }
+
+    fn available_service_tiers(&self) -> Vec<&'static str> {
+        self.inner.available_service_tiers()
     }
 
     fn native_compaction_mode(&self) -> Option<String> {
