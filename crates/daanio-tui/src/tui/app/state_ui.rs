@@ -1905,6 +1905,17 @@ pub(super) fn handle_info_command(app: &mut App, trimmed: &str) -> bool {
         if let Some(ref model) = app.remote_provider_model {
             info.push_str(&format!("Model: {}\n", model));
         }
+        let active_reasoning_effort = if app.is_remote {
+            app.remote_reasoning_effort
+                .clone()
+                .or_else(|| app.provider.reasoning_effort())
+        } else {
+            app.provider.reasoning_effort()
+        };
+        info.push_str(&format!(
+            "Reasoning Effort: {}\n",
+            active_reasoning_effort.as_deref().unwrap_or("high")
+        ));
         if let Some(ref provider_id) = app.provider_session_id {
             info.push_str(&format!(
                 "Provider Session: {}...\n",

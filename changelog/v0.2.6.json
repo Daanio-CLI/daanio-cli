@@ -1,0 +1,10 @@
+{
+  "version": "0.2.6",
+  "date": "2026-07-28",
+  "title": "Reasoning effort usage metadata",
+  "fixes": [
+    "OpenAI-compatible requests now forward the selected reasoning effort as explicit Daanio metadata",
+    "Usage logs can reliably show low, medium, high, xhigh, and other supported effort levels without forcing a default",
+    "The /info command now reports the active reasoning effort, using high as Daanio's default"
+  ]
+}
