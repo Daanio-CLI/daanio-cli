@@ -35,10 +35,23 @@ pub struct SubscriptionMe {
     pub tier: String,
     pub status: String,
     #[serde(default)]
+    pub billing_mode: Option<String>,
+    #[serde(default)]
+    pub credits: Option<CreditBalance>,
+    #[serde(default)]
     pub usage: SubscriptionUsage,
     /// Optional stable public account-management URL. It must never contain a secret.
     #[serde(default)]
     pub manage_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CreditBalance {
+    pub balance_micros: i64,
+    pub reserved_micros: i64,
+    pub available_micros: i64,
+    pub lifetime_purchased_micros: i64,
+    pub lifetime_used_micros: i64,
 }
 
 impl SubscriptionMe {
@@ -47,7 +60,12 @@ impl SubscriptionMe {
     }
 
     pub fn has_active_paid_plan(&self) -> bool {
-        self.status.eq_ignore_ascii_case("active") && self.parsed_tier().is_some()
+        self.status.eq_ignore_ascii_case("active")
+            && (self
+                .billing_mode
+                .as_deref()
+                .is_some_and(|mode| mode.eq_ignore_ascii_case("credits"))
+                || self.parsed_tier().is_some())
     }
 
     pub fn checkout_was_canceled(&self) -> bool {
@@ -202,12 +220,24 @@ struct ModelCatalogEntryWire {
     id: String,
     #[serde(default)]
     context_length: Option<u64>,
+    #[serde(default)]
+    max_output_tokens: Option<u64>,
+    #[serde(default)]
+    reasoning_efforts: Option<Vec<String>>,
+    #[serde(default)]
+    supports_image_input: Option<bool>,
+    #[serde(default)]
+    service_tiers: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AvailableModel {
     pub id: String,
     pub context_length: Option<usize>,
+    pub max_output_tokens: Option<usize>,
+    pub reasoning_efforts: Option<Vec<String>>,
+    pub supports_image_input: Option<bool>,
+    pub service_tiers: Option<Vec<String>>,
 }
 
 pub fn configured_api_base() -> String {
@@ -433,10 +463,28 @@ pub(crate) async fn fetch_available_models_with(
                     .context_length
                     .filter(|limit| *limit > 0)
                     .and_then(|limit| usize::try_from(limit).ok()),
+                max_output_tokens: entry
+                    .max_output_tokens
+                    .filter(|limit| *limit > 0)
+                    .and_then(|limit| usize::try_from(limit).ok()),
+                reasoning_efforts: entry.reasoning_efforts.map(normalize_catalog_values),
+                supports_image_input: entry.supports_image_input,
+                service_tiers: entry.service_tiers.map(normalize_catalog_values),
             });
         }
     }
     Ok(models)
+}
+
+fn normalize_catalog_values(values: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for value in values {
+        let value = value.trim().to_ascii_lowercase();
+        if !value.is_empty() && !normalized.contains(&value) {
+            normalized.push(value);
+        }
+    }
+    normalized
 }
 
 /// Fetch account status using the configured local credential.
@@ -618,6 +666,31 @@ mod tests {
     }
 
     #[test]
+    fn credit_account_is_active_without_a_subscription_tier() {
+        let json = r#"{
+            "account_id":"42",
+            "email":"credit@example.com",
+            "tier":"none",
+            "status":"active",
+            "billing_mode":"credits",
+            "credits":{
+                "balance_micros":5000000,
+                "reserved_micros":1000000,
+                "available_micros":4000000,
+                "lifetime_purchased_micros":6000000,
+                "lifetime_used_micros":1000000
+            }
+        }"#;
+        let me: SubscriptionMe = serde_json::from_str(json).expect("parse credit account");
+        assert_eq!(me.parsed_tier(), None);
+        assert!(me.has_active_paid_plan());
+        assert_eq!(
+            me.credits.as_ref().map(|credits| credits.available_micros),
+            Some(4_000_000)
+        );
+    }
+
+    #[test]
     fn polling_backoff_is_deterministic_and_bounded() {
         let mut state = PollingBackoff::new(Duration::from_secs(3));
         assert_eq!(state.delay(), Duration::from_secs(3));
@@ -667,7 +740,7 @@ mod tests {
         let base = spawn_server(vec![(
             200,
             vec![],
-            r#"{"object":"list","success":true,"data":[{"id":"gpt-5.6-sol","context_length":272000},{"id":" gpt-5.6-sol ","context_length":999999},{"id":"claude-opus-5","context_length":1000000},{"id":"qwen3-coder-next","context_length":0},{"id":""}]}"#.to_string(),
+            r#"{"object":"list","success":true,"data":[{"id":"gpt-5.6-sol","context_length":272000,"max_output_tokens":128000,"reasoning_efforts":[" high ","low","high"],"supports_image_input":false,"service_tiers":[]},{"id":" gpt-5.6-sol ","context_length":999999},{"id":"claude-opus-5","context_length":1000000},{"id":"qwen3-coder-next","context_length":0},{"id":""}]}"#.to_string(),
         )]);
         let models = fetch_available_models_with(&client(), &base, "browser-issued-key")
             .await
@@ -678,14 +751,26 @@ mod tests {
                 AvailableModel {
                     id: "gpt-5.6-sol".to_string(),
                     context_length: Some(272_000),
+                    max_output_tokens: Some(128_000),
+                    reasoning_efforts: Some(vec!["high".to_string(), "low".to_string()]),
+                    supports_image_input: Some(false),
+                    service_tiers: Some(vec![]),
                 },
                 AvailableModel {
                     id: "claude-opus-5".to_string(),
                     context_length: Some(1_000_000),
+                    max_output_tokens: None,
+                    reasoning_efforts: None,
+                    supports_image_input: None,
+                    service_tiers: None,
                 },
                 AvailableModel {
                     id: "qwen3-coder-next".to_string(),
                     context_length: None,
+                    max_output_tokens: None,
+                    reasoning_efforts: None,
+                    supports_image_input: None,
+                    service_tiers: None,
                 },
             ]
         );

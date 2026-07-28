@@ -5,6 +5,26 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+fn advertised_static_values(values: &[String]) -> Vec<&'static str> {
+    values
+        .iter()
+        .filter_map(|value| match value.as_str() {
+            "none" => Some("none"),
+            "minimal" => Some("minimal"),
+            "low" => Some("low"),
+            "medium" => Some("medium"),
+            "high" => Some("high"),
+            "xhigh" => Some("xhigh"),
+            "max" => Some("max"),
+            "default" => Some("default"),
+            "auto" => Some("auto"),
+            "flex" => Some("flex"),
+            "priority" => Some("priority"),
+            _ => None,
+        })
+        .collect()
+}
+
 pub struct DaanioProvider {
     inner: MultiProvider,
     selected_model: Arc<RwLock<String>>,
@@ -14,6 +34,10 @@ pub struct DaanioProvider {
     /// Context limits advertised alongside `live_models` by the authenticated
     /// gateway catalog, keyed by model id.
     live_context_limits: Arc<RwLock<HashMap<String, usize>>>,
+    /// Optional capabilities advertised by the credit-account catalog. An
+    /// explicit empty list/false is authoritative; `None` retains legacy
+    /// model-family fallback behavior.
+    live_capabilities: Arc<RwLock<HashMap<String, crate::subscription_api::AvailableModel>>>,
 }
 
 impl DaanioProvider {
@@ -28,6 +52,7 @@ impl DaanioProvider {
             selected_model: Arc::new(RwLock::new(default_model)),
             live_models: Arc::new(RwLock::new(None)),
             live_context_limits: Arc::new(RwLock::new(HashMap::new())),
+            live_capabilities: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -94,13 +119,18 @@ impl DaanioProvider {
         let models = Self::normalize_advertised_models(&advertised_ids);
         let allowed: std::collections::HashSet<&str> = models.iter().map(String::as_str).collect();
         let context_limits = advertised
-            .into_iter()
+            .iter()
             .filter(|model| allowed.contains(model.id.trim()))
             .filter_map(|model| {
                 model
                     .context_length
                     .map(|limit| (model.id.trim().to_ascii_lowercase(), limit))
             })
+            .collect();
+        let capabilities = advertised
+            .into_iter()
+            .filter(|model| allowed.contains(model.id.trim()))
+            .map(|model| (model.id.trim().to_ascii_lowercase(), model))
             .collect();
         let selected = self.model();
         let replacement = if models.iter().any(|model| model == &selected) {
@@ -121,6 +151,10 @@ impl DaanioProvider {
             .live_context_limits
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = context_limits;
+        *self
+            .live_capabilities
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = capabilities;
         if let Some(model) = replacement {
             let _ = self.inner.set_model(&model);
             if let Ok(mut selected_model) = self.selected_model.write() {
@@ -172,6 +206,10 @@ impl DaanioProvider {
                 .map(|model| crate::subscription_api::AvailableModel {
                     id: (*model).to_string(),
                     context_length: None,
+                    max_output_tokens: None,
+                    reasoning_efforts: None,
+                    supports_image_input: None,
+                    service_tiers: None,
                 })
                 .collect(),
         );
@@ -297,6 +335,10 @@ impl Provider for DaanioProvider {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
+        self.live_capabilities
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
         self.inner.on_auth_changed();
         let selected_model = self.model();
         let _ = self.inner.set_model(&selected_model);
@@ -307,30 +349,103 @@ impl Provider for DaanioProvider {
     }
 
     fn supports_image_input(&self) -> bool {
-        self.inner.supports_image_input()
+        self.live_capabilities
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&self.model().trim().to_ascii_lowercase())
+            .and_then(|model| model.supports_image_input)
+            .unwrap_or_else(|| self.inner.supports_image_input())
     }
 
     fn reasoning_effort(&self) -> Option<String> {
-        self.inner.reasoning_effort()
+        let current = self.inner.reasoning_effort();
+        if let Some(efforts) = self
+            .live_capabilities
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&self.model().trim().to_ascii_lowercase())
+            .and_then(|model| model.reasoning_efforts.as_ref())
+        {
+            return current.filter(|effort| efforts.contains(effort));
+        }
+        current
     }
 
     fn set_reasoning_effort(&self, effort: &str) -> Result<()> {
+        if let Some(efforts) = self
+            .live_capabilities
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&self.model().trim().to_ascii_lowercase())
+            .and_then(|model| model.reasoning_efforts.as_ref())
+            && !efforts.iter().any(|allowed| allowed == effort)
+        {
+            anyhow::bail!(
+                "Reasoning effort '{}' is not advertised for model '{}'; available: {}",
+                effort,
+                self.model(),
+                efforts.join(", ")
+            );
+        }
         self.inner.set_reasoning_effort(effort)
     }
 
     fn available_efforts(&self) -> Vec<&'static str> {
+        if let Some(efforts) = self
+            .live_capabilities
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&self.model().trim().to_ascii_lowercase())
+            .and_then(|model| model.reasoning_efforts.as_ref())
+        {
+            return advertised_static_values(efforts);
+        }
         self.inner.available_efforts()
     }
 
     fn service_tier(&self) -> Option<String> {
-        self.inner.service_tier()
+        let current = self.inner.service_tier();
+        if let Some(tiers) = self
+            .live_capabilities
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&self.model().trim().to_ascii_lowercase())
+            .and_then(|model| model.service_tiers.as_ref())
+        {
+            return current.filter(|tier| tiers.contains(tier));
+        }
+        current
     }
 
     fn set_service_tier(&self, service_tier: &str) -> Result<()> {
+        if let Some(tiers) = self
+            .live_capabilities
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&self.model().trim().to_ascii_lowercase())
+            .and_then(|model| model.service_tiers.as_ref())
+            && !tiers.iter().any(|allowed| allowed == service_tier)
+        {
+            anyhow::bail!(
+                "Service tier '{}' is not advertised for model '{}'; available: {}",
+                service_tier,
+                self.model(),
+                tiers.join(", ")
+            );
+        }
         self.inner.set_service_tier(service_tier)
     }
 
     fn available_service_tiers(&self) -> Vec<&'static str> {
+        if let Some(tiers) = self
+            .live_capabilities
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&self.model().trim().to_ascii_lowercase())
+            .and_then(|model| model.service_tiers.as_ref())
+        {
+            return advertised_static_values(tiers);
+        }
         self.inner.available_service_tiers()
     }
 
@@ -418,6 +533,14 @@ impl Provider for DaanioProvider {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = self
             .live_context_limits
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        *forked
+            .live_capabilities
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = self
+            .live_capabilities
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
@@ -570,21 +693,36 @@ mod tests {
             crate::subscription_api::AvailableModel {
                 id: "gpt-5.6-sol".to_string(),
                 context_length: Some(500_000),
+                max_output_tokens: None,
+                reasoning_efforts: Some(vec!["low".to_string(), "high".to_string()]),
+                supports_image_input: Some(false),
+                service_tiers: Some(vec!["default".to_string()]),
             },
             crate::subscription_api::AvailableModel {
                 id: "gpt-5.5".to_string(),
                 context_length: Some(333_000),
+                max_output_tokens: None,
+                reasoning_efforts: Some(vec!["medium".to_string()]),
+                supports_image_input: Some(true),
+                service_tiers: Some(vec!["priority".to_string()]),
             },
         ]);
 
         assert_eq!(provider.model(), "gpt-5.6-sol");
         assert_eq!(provider.context_window(), 500_000);
+        assert_eq!(provider.available_efforts(), vec!["low", "high"]);
+        assert!(!provider.supports_image_input());
+        assert_eq!(provider.available_service_tiers(), vec!["default"]);
+        assert!(provider.set_reasoning_effort("xhigh").is_err());
 
         *provider
             .selected_model
             .write()
             .expect("selected model lock") = "gpt-5.5".to_string();
         assert_eq!(provider.context_window(), 333_000);
+        assert_eq!(provider.available_efforts(), vec!["medium"]);
+        assert!(provider.supports_image_input());
+        assert_eq!(provider.available_service_tiers(), vec!["priority"]);
         crate::subscription_catalog::clear_runtime_env();
     }
 

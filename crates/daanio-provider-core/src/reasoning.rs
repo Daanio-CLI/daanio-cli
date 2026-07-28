@@ -85,8 +85,7 @@ pub fn inferred_reasoning_efforts(
         return GEMINI_SELECTABLE_EFFORTS.to_vec();
     }
 
-    let is_xai_reasoning_model =
-        model.starts_with("grok-3-mini") || model.starts_with("grok-4");
+    let is_xai_reasoning_model = model.starts_with("grok-3-mini") || model.starts_with("grok-4");
     if provider.contains("xai") || is_xai_reasoning_model {
         return if is_xai_reasoning_model {
             XAI_SELECTABLE_EFFORTS.to_vec()
@@ -196,8 +195,6 @@ mod tests {
             inferred_reasoning_efforts(Some("daanio-subscription"), Some("grok-4")),
             XAI_SELECTABLE_EFFORTS
         );
-        assert!(
-            inferred_reasoning_efforts(Some("daanio-subscription"), Some("grok-2")).is_empty()
-        );
+        assert!(inferred_reasoning_efforts(Some("daanio-subscription"), Some("grok-2")).is_empty());
     }
 }

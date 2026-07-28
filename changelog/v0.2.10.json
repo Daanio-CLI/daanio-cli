@@ -1,0 +1,11 @@
+{
+  "version": "0.2.10",
+  "date": "2026-07-28",
+  "title": "Credit catalog capabilities",
+  "fixes": [
+    "Daanio CLI now parses per-model context, output, reasoning, image-input, and service-tier metadata from new-api",
+    "Explicit unsupported capabilities from the API override model-family guesses",
+    "Model switching and provider forks preserve the authenticated credit catalog capabilities",
+    "Legacy servers that omit capability fields retain safe compatibility fallbacks"
+  ]
+}

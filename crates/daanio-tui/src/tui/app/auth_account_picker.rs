@@ -38,13 +38,13 @@ impl App {
         let provider_scope = provider_filter.map(|value| value.to_string());
         let claude_accounts = crate::auth::claude::list_accounts().unwrap_or_default();
         let openai_accounts = crate::auth::codex::list_accounts().unwrap_or_default();
-        let add_replace_scope_supports_multi_account =
-            std::env::var_os("DAANIO_FIRST_PARTY_ONLY").is_none()
-                && match provider_scope.as_deref() {
-                    None => true,
-                    Some("claude" | "anthropic" | "openai") => true,
-                    Some(_) => false,
-                };
+        let add_replace_scope_supports_multi_account = std::env::var_os("DAANIO_FIRST_PARTY_ONLY")
+            .is_none()
+            && match provider_scope.as_deref() {
+                None => true,
+                Some("claude" | "anthropic" | "openai") => true,
+                Some(_) => false,
+            };
 
         if add_replace_scope_supports_multi_account {
             let scoped_saved_accounts = match provider_scope.as_deref() {
