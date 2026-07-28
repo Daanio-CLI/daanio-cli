@@ -28,6 +28,7 @@ fn advertised_static_values(values: &[String]) -> Vec<&'static str> {
 pub struct DaanioProvider {
     inner: MultiProvider,
     selected_model: Arc<RwLock<String>>,
+    selected_reasoning_effort: Arc<RwLock<Option<String>>>,
     /// `None` until the authenticated gateway catalog has been fetched. Once
     /// hydrated, including with an empty list, the server is authoritative.
     live_models: Arc<RwLock<Option<Vec<String>>>>,
@@ -50,6 +51,7 @@ impl DaanioProvider {
         Self {
             inner,
             selected_model: Arc::new(RwLock::new(default_model)),
+            selected_reasoning_effort: Arc::new(RwLock::new(None)),
             live_models: Arc::new(RwLock::new(None)),
             live_context_limits: Arc::new(RwLock::new(HashMap::new())),
             live_capabilities: Arc::new(RwLock::new(HashMap::new())),
@@ -99,6 +101,69 @@ impl DaanioProvider {
             .filter(|model| seen.insert((*model).to_string()))
             .map(str::to_string)
             .collect()
+    }
+
+    fn reasoning_efforts_for_model(&self, model: &str) -> Vec<&'static str> {
+        if let Some(efforts) = self
+            .live_capabilities
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&model.trim().to_ascii_lowercase())
+            .and_then(|capabilities| capabilities.reasoning_efforts.as_ref())
+        {
+            return advertised_static_values(efforts);
+        }
+        let normalized = model.trim().to_ascii_lowercase();
+        if normalized.starts_with("gpt-image-")
+            || normalized.contains("-image")
+            || normalized.starts_with("kimi-")
+        {
+            return Vec::new();
+        }
+        daanio_provider_core::inferred_reasoning_efforts(None, Some(model))
+            .into_iter()
+            .filter(|effort| !crate::prompt::is_swarm_effort(effort))
+            .collect()
+    }
+
+    fn strongest_advertised_effort(efforts: &[&'static str]) -> Option<&'static str> {
+        ["max", "xhigh", "high", "medium", "low", "minimal", "none"]
+            .into_iter()
+            .find(|candidate| efforts.contains(candidate))
+    }
+
+    fn reconcile_reasoning_effort(&self) -> Result<()> {
+        let selected = self
+            .selected_reasoning_effort
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .or_else(|| self.inner.reasoning_effort());
+        let Some(selected) = selected else {
+            return Ok(());
+        };
+        let efforts = self.reasoning_efforts_for_model(&self.model());
+        let wire_effort = if crate::prompt::is_swarm_effort(&selected) {
+            Self::strongest_advertised_effort(&efforts)
+        } else {
+            efforts
+                .contains(&selected.as_str())
+                .then_some(selected.as_str())
+        };
+        if let Some(wire_effort) = wire_effort {
+            self.inner.set_reasoning_effort(wire_effort)?;
+            *self
+                .selected_reasoning_effort
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(selected);
+            return Ok(());
+        }
+        self.inner.set_reasoning_effort("")?;
+        *self
+            .selected_reasoning_effort
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        Ok(())
     }
 
     fn hydrated_models(&self) -> Vec<String> {
@@ -161,6 +226,7 @@ impl DaanioProvider {
                 *selected_model = model;
             }
         }
+        let _ = self.reconcile_reasoning_effort();
     }
 
     fn live_model_routes(&self) -> Vec<ModelRoute> {
@@ -232,6 +298,7 @@ impl Provider for DaanioProvider {
         resume_session_id: Option<&str>,
     ) -> Result<EventStream> {
         self.ensure_runtime_mode();
+        self.reconcile_reasoning_effort()?;
         self.inner
             .complete(messages, tools, system, resume_session_id)
             .await
@@ -246,6 +313,7 @@ impl Provider for DaanioProvider {
         resume_session_id: Option<&str>,
     ) -> Result<EventStream> {
         self.ensure_runtime_mode();
+        self.reconcile_reasoning_effort()?;
         self.inner
             .complete_split(
                 messages,
@@ -275,6 +343,7 @@ impl Provider for DaanioProvider {
         if let Ok(mut selected_model) = self.selected_model.write() {
             *selected_model = selected;
         }
+        self.reconcile_reasoning_effort()?;
         Ok(())
     }
 
@@ -358,49 +427,50 @@ impl Provider for DaanioProvider {
     }
 
     fn reasoning_effort(&self) -> Option<String> {
-        let current = self.inner.reasoning_effort();
-        if let Some(efforts) = self
-            .live_capabilities
+        self.selected_reasoning_effort
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&self.model().trim().to_ascii_lowercase())
-            .and_then(|model| model.reasoning_efforts.as_ref())
-        {
-            return current.filter(|effort| efforts.contains(effort));
-        }
-        current
+            .clone()
+            .or_else(|| {
+                let efforts = self.reasoning_efforts_for_model(&self.model());
+                self.inner
+                    .reasoning_effort()
+                    .filter(|effort| efforts.contains(&effort.as_str()))
+            })
     }
 
     fn set_reasoning_effort(&self, effort: &str) -> Result<()> {
-        if let Some(efforts) = self
-            .live_capabilities
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&self.model().trim().to_ascii_lowercase())
-            .and_then(|model| model.reasoning_efforts.as_ref())
-            && !efforts.iter().any(|allowed| allowed == effort)
-        {
+        let normalized = effort.trim().to_ascii_lowercase();
+        let efforts = self.reasoning_efforts_for_model(&self.model());
+        let wire_effort = if crate::prompt::is_swarm_effort(&normalized) {
+            Self::strongest_advertised_effort(&efforts)
+        } else {
+            efforts
+                .contains(&normalized.as_str())
+                .then_some(normalized.as_str())
+        };
+        let Some(wire_effort) = wire_effort else {
             anyhow::bail!(
                 "Reasoning effort '{}' is not advertised for model '{}'; available: {}",
                 effort,
                 self.model(),
                 efforts.join(", ")
             );
-        }
-        self.inner.set_reasoning_effort(effort)
+        };
+        self.inner.set_reasoning_effort(wire_effort)?;
+        *self
+            .selected_reasoning_effort
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(normalized);
+        Ok(())
     }
 
     fn available_efforts(&self) -> Vec<&'static str> {
-        if let Some(efforts) = self
-            .live_capabilities
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&self.model().trim().to_ascii_lowercase())
-            .and_then(|model| model.reasoning_efforts.as_ref())
-        {
-            return advertised_static_values(efforts);
+        let mut efforts = self.reasoning_efforts_for_model(&self.model());
+        if !efforts.is_empty() {
+            efforts.extend(["swarm", "swarm-deep"]);
         }
-        self.inner.available_efforts()
+        efforts
     }
 
     fn service_tier(&self) -> Option<String> {
@@ -546,6 +616,9 @@ impl Provider for DaanioProvider {
             .clone();
         let selected_model = self.model();
         let _ = forked.set_model(&selected_model);
+        if let Some(effort) = self.reasoning_effort() {
+            let _ = forked.set_reasoning_effort(&effort);
+        }
         Arc::new(forked)
     }
 
@@ -566,6 +639,73 @@ impl Provider for DaanioProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct DaanioRuntimeEnvGuard {
+        previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl DaanioRuntimeEnvGuard {
+        fn install() -> Self {
+            const KEYS: &[&str] = &[
+                "DAANIO_API_KEY",
+                "DAANIO_API_BASE",
+                "DAANIO_SUBSCRIPTION_ACTIVE",
+                "DAANIO_OPENROUTER_API_BASE",
+                "DAANIO_OPENROUTER_API_KEY_NAME",
+                "DAANIO_OPENROUTER_ENV_FILE",
+                "DAANIO_OPENROUTER_CACHE_NAMESPACE",
+                "DAANIO_OPENROUTER_PROVIDER_FEATURES",
+                "DAANIO_OPENROUTER_TRANSPORT_STATE",
+                "DAANIO_OPENROUTER_ALLOW_NO_AUTH",
+                "DAANIO_OPENROUTER_PROVIDER",
+                "DAANIO_OPENROUTER_NO_FALLBACK",
+                "DAANIO_OPENROUTER_MODEL",
+                "DAANIO_RUNTIME_PROVIDER",
+                "DAANIO_ACTIVE_PROVIDER",
+                "DAANIO_FORCE_PROVIDER",
+            ];
+            let previous = KEYS
+                .iter()
+                .map(|key| (*key, std::env::var_os(key)))
+                .collect();
+            crate::env::set_var("DAANIO_API_KEY", "test-daanio-credit-key");
+            crate::env::set_var(
+                "DAANIO_API_BASE",
+                crate::subscription_catalog::DEFAULT_DAANIO_API_BASE,
+            );
+            crate::env::set_var("DAANIO_OPENROUTER_TRANSPORT_STATE", "daanio-subscription");
+            crate::provider::external::register_openrouter_factory(|spec| {
+                use crate::provider::external::OpenRouterRuntimeSpec;
+                use daanio_provider_openrouter_runtime::OpenRouterProvider;
+                let provider: Arc<dyn Provider> = match spec {
+                    OpenRouterRuntimeSpec::Default => Arc::new(OpenRouterProvider::new()?),
+                    OpenRouterRuntimeSpec::OpenRouterApiKey => {
+                        Arc::new(OpenRouterProvider::new_openrouter_api_key_runtime()?)
+                    }
+                    OpenRouterRuntimeSpec::CompatibleProfile(profile) => Arc::new(
+                        OpenRouterProvider::new_openai_compatible_profile_runtime(profile)?,
+                    ),
+                    OpenRouterRuntimeSpec::NamedProfile { name, config } => Arc::new(
+                        OpenRouterProvider::new_named_openai_compatible(&name, &config)?,
+                    ),
+                };
+                Ok(provider)
+            });
+            Self { previous }
+        }
+    }
+
+    impl Drop for DaanioRuntimeEnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.previous.drain(..).rev() {
+                if let Some(value) = value {
+                    crate::env::set_var(key, value);
+                } else {
+                    crate::env::remove_var(key);
+                }
+            }
+        }
+    }
 
     #[test]
     fn daanio_provider_enables_subscription_runtime_mode() {
@@ -723,6 +863,177 @@ mod tests {
         assert_eq!(provider.available_efforts(), vec!["medium"]);
         assert!(provider.supports_image_input());
         assert_eq!(provider.available_service_tiers(), vec!["priority"]);
+        crate::subscription_catalog::clear_runtime_env();
+    }
+
+    fn reasoning_model(id: &str, efforts: &[&str]) -> crate::subscription_api::AvailableModel {
+        crate::subscription_api::AvailableModel {
+            id: id.to_string(),
+            context_length: None,
+            max_output_tokens: None,
+            reasoning_efforts: Some(efforts.iter().map(|effort| (*effort).to_string()).collect()),
+            supports_image_input: None,
+            service_tiers: None,
+        }
+    }
+
+    #[test]
+    fn live_catalog_reasoning_is_authoritative_across_model_families() {
+        let _guard = crate::storage::lock_test_env();
+        crate::subscription_catalog::clear_runtime_env();
+        let _runtime_env = DaanioRuntimeEnvGuard::install();
+
+        let cases = [
+            ("claude-opus-5", &["low", "high"][..]),
+            ("gpt-5.6-sol", &["minimal", "xhigh"][..]),
+            ("gemini-3-pro", &["minimal", "high"][..]),
+            ("grok-4", &["low", "high"][..]),
+            ("deepseek-v4", &["low", "max"][..]),
+            ("kimi-k2-thinking", &["low", "high"][..]),
+            ("future-reasoner-not-known-to-cli", &["medium"][..]),
+        ];
+
+        for (model, advertised) in cases {
+            let provider = DaanioProvider::new();
+            provider.store_live_models(vec![reasoning_model(model, advertised)]);
+
+            assert_eq!(provider.model(), model);
+            let mut selectable = advertised.to_vec();
+            selectable.extend(["swarm", "swarm-deep"]);
+            assert_eq!(
+                provider.available_efforts(),
+                selectable,
+                "{model} must expose the gateway ladder plus CLI orchestration modes"
+            );
+            for effort in advertised {
+                provider
+                    .set_reasoning_effort(effort)
+                    .unwrap_or_else(|error| {
+                        panic!("{model} must accept gateway-advertised effort {effort}: {error:#}")
+                    });
+                assert_eq!(
+                    provider.reasoning_effort().as_deref(),
+                    Some(*effort),
+                    "{model} must preserve the selected gateway effort"
+                );
+            }
+
+            assert!(
+                provider.set_reasoning_effort("none").is_err(),
+                "{model} must reject a known effort omitted by its authoritative ladder"
+            );
+        }
+
+        crate::subscription_catalog::clear_runtime_env();
+    }
+
+    #[test]
+    fn explicit_empty_reasoning_ladder_disables_family_fallback() {
+        let _guard = crate::storage::lock_test_env();
+        crate::subscription_catalog::clear_runtime_env();
+        let _runtime_env = DaanioRuntimeEnvGuard::install();
+        let provider = DaanioProvider::new();
+
+        provider.store_live_models(vec![reasoning_model("gpt-5.6-sol", &[])]);
+
+        assert!(provider.available_efforts().is_empty());
+        assert_eq!(provider.reasoning_effort(), None);
+        assert!(provider.set_reasoning_effort("high").is_err());
+        assert!(provider.set_reasoning_effort("swarm").is_err());
+
+        crate::subscription_catalog::clear_runtime_env();
+    }
+
+    #[test]
+    fn swarm_modes_are_preserved_when_catalog_advertises_reasoning() {
+        let _guard = crate::storage::lock_test_env();
+        crate::subscription_catalog::clear_runtime_env();
+        let _runtime_env = DaanioRuntimeEnvGuard::install();
+        let provider = DaanioProvider::new();
+
+        provider.store_live_models(vec![reasoning_model(
+            "future-reasoner-not-known-to-cli",
+            &["low", "high"],
+        )]);
+
+        provider
+            .set_reasoning_effort("swarm")
+            .expect("swarm is a CLI orchestration mode above the advertised wire ladder");
+        assert_eq!(provider.reasoning_effort().as_deref(), Some("swarm"));
+        assert_eq!(
+            provider.inner.reasoning_effort().as_deref(),
+            Some("high"),
+            "swarm must use the strongest effort actually advertised, never an implicit max"
+        );
+        provider
+            .set_reasoning_effort("swarm-deep")
+            .expect("deep swarm is a CLI orchestration mode above the advertised wire ladder");
+        assert_eq!(provider.reasoning_effort().as_deref(), Some("swarm-deep"));
+        assert_eq!(provider.inner.reasoning_effort().as_deref(), Some("high"));
+
+        crate::subscription_catalog::clear_runtime_env();
+    }
+
+    #[test]
+    fn model_switch_reconciles_stale_effort_against_new_catalog_entry() {
+        let _guard = crate::storage::lock_test_env();
+        crate::subscription_catalog::clear_runtime_env();
+        let _runtime_env = DaanioRuntimeEnvGuard::install();
+        let provider = DaanioProvider::new();
+        provider.store_live_models(vec![
+            reasoning_model("gpt-5.6-sol", &["low", "xhigh"]),
+            reasoning_model("kimi-k3", &[]),
+        ]);
+
+        provider.set_model("gpt-5.6-sol").unwrap();
+        provider.set_reasoning_effort("xhigh").unwrap();
+        assert_eq!(provider.inner.reasoning_effort().as_deref(), Some("xhigh"));
+
+        provider.set_model("kimi-k3").unwrap();
+        assert_eq!(provider.reasoning_effort(), None);
+        assert_eq!(
+            provider.inner.reasoning_effort(),
+            None,
+            "disallowed effort must be cleared from the request transport"
+        );
+
+        crate::subscription_catalog::clear_runtime_env();
+    }
+
+    #[test]
+    fn missing_reasoning_metadata_uses_conservative_family_fallback() {
+        let _guard = crate::storage::lock_test_env();
+        crate::subscription_catalog::clear_runtime_env();
+        let _runtime_env = DaanioRuntimeEnvGuard::install();
+        let media_provider = DaanioProvider::new();
+        assert!(
+            media_provider
+                .reasoning_efforts_for_model("gpt-image-2")
+                .is_empty(),
+            "non-chat media models must never inherit the GPT reasoning ladder"
+        );
+
+        for (model, expected) in [
+            ("kimi-k3", Vec::<&str>::new()),
+            ("future-non-reasoner", Vec::<&str>::new()),
+            (
+                "gemini-3-flash",
+                vec!["minimal", "low", "medium", "high", "swarm", "swarm-deep"],
+            ),
+            ("grok-4.5", vec!["low", "high", "swarm", "swarm-deep"]),
+        ] {
+            let provider = DaanioProvider::new();
+            provider.store_live_models(vec![crate::subscription_api::AvailableModel {
+                id: model.to_string(),
+                context_length: None,
+                max_output_tokens: None,
+                reasoning_efforts: None,
+                supports_image_input: None,
+                service_tiers: None,
+            }]);
+            assert_eq!(provider.available_efforts(), expected, "{model}");
+        }
+
         crate::subscription_catalog::clear_runtime_env();
     }
 

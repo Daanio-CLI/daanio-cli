@@ -126,29 +126,21 @@ impl Provider for OpenRouterProvider {
         let mut sent_reasoning_config = false;
         if let Some(effort) = reasoning_effort.as_deref() {
             if self.supports_deepseek_reasoning_effort() {
-                // The `swarm` sentinel maps to the strongest real effort.
-                let effort = if daanio_base::prompt::is_swarm_effort(effort) {
-                    "max"
-                } else {
-                    effort
-                };
-                if effort != "none" {
+                let effort = self.wire_reasoning_effort(effort);
+                if effort != "none" || self.is_daanio_subscription_runtime() {
                     request["reasoning_effort"] = serde_json::json!(effort);
                     sent_reasoning_config = true;
                 }
             } else if self.supports_openai_reasoning_effort()
                 || self.supports_gemini_reasoning_effort()
                 || self.supports_xai_reasoning_effort()
+                || self.supports_daanio_catalog_reasoning_effort()
             {
-                // GPT-family models on direct compat gateways (e.g. OpenCode
-                // Zen serving gpt-5.3-codex-spark) take the standard OpenAI
-                // `reasoning_effort` field with OpenAI's effort vocabulary.
-                let effort = if daanio_base::prompt::is_swarm_effort(effort) {
-                    "max"
-                } else {
-                    effort
-                };
-                if effort != "none" {
+                // Reasoning models on compatible gateways take the standard
+                // top-level `reasoning_effort` field. This also covers Claude
+                // models routed through Daanio's managed subscription gateway.
+                let effort = self.wire_reasoning_effort(effort);
+                if effort != "none" || self.is_daanio_subscription_runtime() {
                     request["reasoning_effort"] = serde_json::json!(effort);
                     sent_reasoning_config = true;
                 }
@@ -445,7 +437,7 @@ impl Provider for OpenRouterProvider {
     fn set_reasoning_effort(&self, effort: &str) -> Result<()> {
         if !self.supports_any_reasoning_effort() {
             anyhow::bail!(
-                "Reasoning effort is not supported by the current model/profile. It works for OpenRouter, DeepSeek-family and GPT-family reasoning models, and profiles with supports_reasoning_effort = true."
+                "Reasoning effort is not supported by the current model/profile. It works for Daanio-advertised Claude models, OpenRouter, DeepSeek-family and GPT-family reasoning models, and profiles with supports_reasoning_effort = true."
             );
         }
         let requested = effort.trim().to_ascii_lowercase();
@@ -454,6 +446,7 @@ impl Provider for OpenRouterProvider {
             && !self.supports_openai_reasoning_effort()
             && !self.supports_gemini_reasoning_effort()
             && !self.supports_xai_reasoning_effort()
+            && !self.supports_daanio_catalog_reasoning_effort()
             && requested == "max"
         {
             accepted = true;
@@ -480,6 +473,8 @@ impl Provider for OpenRouterProvider {
             daanio_provider_core::GEMINI_SELECTABLE_EFFORTS.to_vec()
         } else if self.supports_xai_reasoning_effort() {
             daanio_provider_core::XAI_SELECTABLE_EFFORTS.to_vec()
+        } else if self.supports_daanio_catalog_reasoning_effort() {
+            daanio_provider_core::OPENAI_SELECTABLE_EFFORTS.to_vec()
         } else if self.supports_openai_reasoning_effort() {
             daanio_provider_core::OPENAI_SELECTABLE_EFFORTS.to_vec()
         } else if Self::profile_supports_unified_reasoning(

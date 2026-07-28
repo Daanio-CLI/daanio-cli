@@ -1073,7 +1073,10 @@ impl App {
                 options: vec![PickerOption {
                     provider: self.provider.name().to_string(),
                     api_method: "current".to_string(),
-                    available: true,
+                    // This is status UI, not a catalog route. Keeping it
+                    // unavailable prevents Enter from staging a model switch
+                    // while the authoritative catalog is still hydrating.
+                    available: false,
                     detail: "updating model list…".to_string(),
                     estimated_reference_cost_micros: None,
                 }],
@@ -1249,7 +1252,10 @@ impl App {
                     .clone()
                     .unwrap_or_else(|| "current".to_string()),
                 api_method: "current".to_string(),
-                available: true,
+                // A known current model is useful context while a remote
+                // catalog is loading, but it is not confirmation that the
+                // latest server catalog still advertises the route.
+                available: false,
                 detail: "catalog still loading".to_string(),
                 cheapness: None,
             }]

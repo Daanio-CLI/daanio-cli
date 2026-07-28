@@ -1067,6 +1067,14 @@ impl OpenRouterProvider {
             && Self::model_is_xai_reasoning_family(&self.model_snapshot())
     }
 
+    /// Daanio's authenticated model catalog is authoritative about which
+    /// models accept reasoning effort. The subscription wrapper validates the
+    /// advertised per-model ladder before delegating here, so this transport
+    /// must not apply a second, hard-coded family allowlist.
+    pub(crate) fn supports_daanio_catalog_reasoning_effort(&self) -> bool {
+        self.is_daanio_subscription_runtime()
+    }
+
     fn model_snapshot(&self) -> String {
         self.model
             .try_read()
@@ -1079,6 +1087,7 @@ impl OpenRouterProvider {
             || self.supports_openai_reasoning_effort()
             || self.supports_gemini_reasoning_effort()
             || self.supports_xai_reasoning_effort()
+            || self.supports_daanio_catalog_reasoning_effort()
             || Self::profile_supports_unified_reasoning(
                 self.profile_id.as_deref(),
                 self.send_openrouter_headers,
@@ -1092,11 +1101,33 @@ impl OpenRouterProvider {
             Self::normalize_gemini_reasoning_effort(effort)
         } else if self.supports_xai_reasoning_effort() {
             Self::normalize_xai_reasoning_effort(effort)
+        } else if self.supports_daanio_catalog_reasoning_effort() {
+            Self::normalize_openai_reasoning_effort(effort)
         } else if self.supports_openai_reasoning_effort() {
             Self::normalize_openai_reasoning_effort(effort)
         } else {
             Self::normalize_unified_reasoning_effort(effort)
         }
+    }
+
+    pub(crate) fn wire_reasoning_effort<'a>(&self, effort: &'a str) -> &'a str {
+        if !daanio_base::prompt::is_swarm_effort(effort) {
+            return effort;
+        }
+        if self.supports_gemini_reasoning_effort() || self.supports_xai_reasoning_effort() {
+            return "high";
+        }
+        if self.supports_daanio_catalog_reasoning_effort()
+            && self
+                .model_snapshot()
+                .trim()
+                .to_ascii_lowercase()
+                .starts_with("claude-")
+            && !daanio_provider_core::anthropic_reasoning_caps(&self.model_snapshot()).max_effort
+        {
+            return "high";
+        }
+        "max"
     }
 
     /// Initial reasoning effort at construction. Named/compat profiles that

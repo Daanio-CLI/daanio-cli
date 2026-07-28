@@ -1,6 +1,6 @@
 [package]
 name = "daanio"
-version = "0.2.11"
+version = "0.2.12"
 description = "Daanio CLI — a coding agent powered exclusively by the Daanio AI gateway"
 edition = "2024"
 autobins = false

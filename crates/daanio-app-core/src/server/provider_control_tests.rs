@@ -230,6 +230,58 @@ impl Provider for AuthChangeMockProvider {
     }
 }
 
+#[tokio::test]
+async fn explicit_model_switch_delegates_when_catalog_snapshot_is_empty() {
+    let provider = Arc::new(AuthChangeMockProvider::new());
+    *provider.state.routes_override.write().unwrap() = Some(Vec::new());
+    let provider_dyn: Arc<dyn Provider> = provider.clone();
+    let agent = Arc::new(Mutex::new(Agent::new(provider_dyn, Registry::empty())));
+    let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
+
+    handle_set_model(901, "claude-opus-4-6".to_string(), &agent, &client_event_tx).await;
+
+    match client_event_rx.recv().await {
+        Some(ServerEvent::ModelChanged {
+            id, model, error, ..
+        }) => {
+            assert_eq!(id, 901);
+            assert_eq!(model, "claude-opus-4-6");
+            assert_eq!(error, None);
+        }
+        event => panic!("expected successful model change, got {event:?}"),
+    }
+}
+
+#[tokio::test]
+async fn explicit_route_switch_delegates_when_catalog_snapshot_is_empty() {
+    let provider = Arc::new(AuthChangeMockProvider::new());
+    *provider.state.routes_override.write().unwrap() = Some(Vec::new());
+    let provider_dyn: Arc<dyn Provider> = provider.clone();
+    let agent = Arc::new(Mutex::new(Agent::new(provider_dyn, Registry::empty())));
+    let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
+    let selection = crate::provider::RouteSelection::from_model_route(&ModelRoute {
+        model: "claude-opus-4-6".to_string(),
+        provider: "Daanio".to_string(),
+        api_method: "daanio-subscription".to_string(),
+        available: true,
+        detail: String::new(),
+        cheapness: None,
+    });
+
+    handle_set_route(902, selection, &agent, &client_event_tx).await;
+
+    match client_event_rx.recv().await {
+        Some(ServerEvent::ModelChanged {
+            id, model, error, ..
+        }) => {
+            assert_eq!(id, 902);
+            assert_eq!(model, "claude-opus-4-6");
+            assert_eq!(error, None);
+        }
+        event => panic!("expected successful route change, got {event:?}"),
+    }
+}
+
 fn lock_env() -> StdMutexGuard<'static, ()> {
     static LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| StdMutex::new(()))

@@ -1,0 +1,10 @@
+{
+  "version": "0.2.12",
+  "title": "Authoritative model capabilities",
+  "changes": [
+    "Daanio model switching now delegates explicit selections even while the server catalog is refreshing",
+    "Reasoning effort follows each model's live API-advertised capability ladder across Claude, GPT, Gemini, xAI, DeepSeek, and other gateway models",
+    "Model switches clear stale effort values, while swarm modes map to the strongest effort actually advertised",
+    "Loading and stale catalog placeholder rows can no longer trigger invalid model switches"
+  ]
+}

@@ -58,6 +58,71 @@ fn test_open_model_picker_without_routes_shows_actionable_guidance() {
     assert!(last.content.contains("/model"));
 }
 
+#[test]
+fn test_loading_model_picker_placeholder_cannot_switch_local_model() {
+    let mut app = create_test_app();
+    let original_model = app.provider.model();
+    app.auth_catalog_refresh_pending = true;
+
+    app.open_model_picker();
+
+    let picker = app
+        .inline_interactive_state
+        .as_ref()
+        .expect("loading model picker should be visible");
+    assert_eq!(picker.entries.len(), 1);
+    assert_eq!(picker.entries[0].options.len(), 1);
+    assert!(!picker.entries[0].options[0].available);
+    assert_eq!(
+        picker.entries[0].options[0].detail,
+        "updating model list…"
+    );
+
+    app.handle_key(KeyCode::Enter, KeyModifiers::empty())
+        .expect("Enter on loading placeholder");
+
+    assert_eq!(app.provider.model(), original_model);
+    assert!(app.pending_model_switch.is_none());
+    assert!(app.pending_route_selection.is_none());
+}
+
+#[test]
+fn test_remote_catalog_loading_fallback_cannot_stage_model_switch() {
+    let _env_lock = crate::storage::lock_test_env();
+    let _guard = AzureLoginEnvGuard::save(&["DAANIO_HOME"]);
+    let temp_home = tempfile::TempDir::new().expect("create isolated Daanio home");
+    crate::env::set_var("DAANIO_HOME", temp_home.path());
+
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.remote_provider_name = Some("Daanio".to_string());
+    app.remote_provider_model = Some("claude-opus-4-6".to_string());
+    app.remote_available_entries.clear();
+    app.remote_model_options.clear();
+    app.invalidate_model_picker_cache();
+
+    app.open_model_picker();
+
+    let picker = app
+        .inline_interactive_state
+        .as_ref()
+        .expect("remote loading fallback should be visible");
+    assert_eq!(picker.entries.len(), 1);
+    assert_eq!(picker.entries[0].name, "claude-opus-4-6");
+    assert_eq!(picker.entries[0].options.len(), 1);
+    assert!(!picker.entries[0].options[0].available);
+    assert_eq!(
+        picker.entries[0].options[0].detail,
+        "catalog still loading"
+    );
+
+    app.handle_key(KeyCode::Enter, KeyModifiers::empty())
+        .expect("Enter on remote loading fallback");
+
+    assert!(app.pending_model_switch.is_none());
+    assert!(app.pending_route_selection.is_none());
+}
+
 #[derive(Clone)]
 struct CountingModelRoutesProvider {
     calls: StdArc<AtomicUsize>,

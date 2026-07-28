@@ -2339,17 +2339,39 @@ fn daanio_subscription_runtime_has_explicit_display_and_route_identity() {
     );
 
     let provider = OpenRouterProvider::new().expect("build daanio subscription runtime");
-    assert_eq!(provider.runtime_display_name(), "Daanio Subscription");
-    assert_eq!(Provider::display_name(&provider), "Daanio Subscription");
+    assert_eq!(provider.runtime_display_name(), "Daanio");
+    assert_eq!(Provider::display_name(&provider), "Daanio");
     assert_eq!(Provider::name(&provider), "openrouter");
     assert_eq!(
         provider.direct_openai_compatible_route_parts(),
         Some((
-            "Daanio Subscription".to_string(),
+            "Daanio".to_string(),
             "daanio-subscription".to_string(),
             daanio_base::subscription_catalog::DEFAULT_DAANIO_API_BASE.to_string(),
         ))
     );
+
+    provider
+        .set_model("claude-fable-5")
+        .expect("select Daanio Claude model");
+    assert_eq!(
+        provider.available_efforts(),
+        vec![
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "swarm",
+            "swarm-deep"
+        ]
+    );
+    provider
+        .set_reasoning_effort("max")
+        .expect("Daanio Claude models accept advertised reasoning effort");
+    assert_eq!(provider.reasoning_effort().as_deref(), Some("max"));
 }
 
 #[test]

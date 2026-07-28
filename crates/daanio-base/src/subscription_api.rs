@@ -804,6 +804,26 @@ mod tests {
         assert!(models.is_empty());
     }
 
+    #[test]
+    fn catalog_reasoning_values_are_case_normalized_ordered_and_deduplicated() {
+        assert_eq!(
+            normalize_catalog_values(vec![
+                " HIGH ".to_string(),
+                "minimal".to_string(),
+                "High".to_string(),
+                " XHIGH".to_string(),
+                "".to_string(),
+                "   ".to_string(),
+            ]),
+            vec!["high", "minimal", "xhigh"]
+        );
+        assert_eq!(
+            normalize_catalog_values(Vec::new()),
+            Vec::<String>::new(),
+            "an explicit empty capability list must remain distinguishable from a missing field"
+        );
+    }
+
     #[tokio::test]
     async fn token_poll_handles_pending_slow_down_success_denied_and_replay() {
         let base = spawn_server(vec![
