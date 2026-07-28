@@ -1,0 +1,9 @@
+{
+  "version": "0.2.7",
+  "date": "2026-07-28",
+  "title": "Swarm reasoning effort inheritance",
+  "fixes": [
+    "Swarm workers now inherit the coordinator's active reasoning effort when no per-spawn override is provided",
+    "Explicit low, medium, high, xhigh, and other supported per-worker effort overrides continue to take precedence"
+  ]
+}

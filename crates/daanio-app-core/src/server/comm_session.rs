@@ -104,6 +104,21 @@ fn create_visible_spawn_session(
     Ok((session.id.clone(), cwd))
 }
 
+fn resolve_swarm_spawn_effort(
+    requested_effort: Option<&str>,
+    coordinator_session_id: &str,
+) -> Option<String> {
+    requested_effort
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())
+        .map(str::to_string)
+        // An omitted per-spawn override means "inherit the coordinator", not
+        // "fall back to the provider/config default". Without this, workers
+        // silently reverted to high even when the user selected low, medium,
+        // or xhigh for the active session.
+        .or_else(|| crate::session_effort::session_effort(coordinator_session_id))
+}
+
 async fn resolve_spawn_working_dir(
     requested_working_dir: Option<String>,
     req_session_id: &str,
@@ -636,11 +651,7 @@ pub(super) async fn spawn_swarm_agent(
     let spawn_model = Some(require_swarm_spawn_model(&selection)?);
     let spawn_provider_key = selection.provider_key.clone();
     let spawn_route_api_method = selection.route_api_method.clone();
-    let spawn_effort = requested_effort
-        .as_deref()
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())
-        .map(str::to_string);
+    let spawn_effort = resolve_swarm_spawn_effort(requested_effort.as_deref(), req_session_id);
     crate::logging::info(&format!(
         "Swarm spawn model resolution: requested_model={:?} requested_effort={:?} configured_swarm_model={:?} coordinator_model={:?} coordinator_provider_key={:?} coordinator_route={:?} -> spawn_model={:?} spawn_provider_key={:?} spawn_route={:?}",
         requested_model,

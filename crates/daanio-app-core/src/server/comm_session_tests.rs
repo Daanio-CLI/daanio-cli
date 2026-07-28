@@ -422,6 +422,28 @@ fn prepare_visible_spawn_session_persists_requested_effort() {
 }
 
 #[test]
+fn swarm_spawn_effort_inherits_coordinator_selection() {
+    let coordinator_id = "test_effort_inheritance_coordinator";
+    crate::session_effort::record_session_effort(coordinator_id, Some("xhigh"));
+
+    let inherited = resolve_swarm_spawn_effort(None, coordinator_id);
+
+    assert_eq!(inherited.as_deref(), Some("xhigh"));
+    crate::session_effort::forget_session_effort(coordinator_id);
+}
+
+#[test]
+fn swarm_spawn_effort_explicit_override_wins() {
+    let coordinator_id = "test_effort_override_coordinator";
+    crate::session_effort::record_session_effort(coordinator_id, Some("xhigh"));
+
+    let resolved = resolve_swarm_spawn_effort(Some("low"), coordinator_id);
+
+    assert_eq!(resolved.as_deref(), Some("low"));
+    crate::session_effort::forget_session_effort(coordinator_id);
+}
+
+#[test]
 fn prepare_visible_spawn_session_prefers_parent_provider_key_over_model_guess() {
     let _guard = crate::storage::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
