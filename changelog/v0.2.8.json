@@ -1,0 +1,11 @@
+{
+  "version": "0.2.8",
+  "date": "2026-07-28",
+  "title": "Subscription reasoning effort picker",
+  "fixes": [
+    "Daanio subscription models now expose model-specific reasoning effort choices in the model picker",
+    "GPT-5.6 Sol now allows xhigh and the rest of its supported OpenAI reasoning ladder",
+    "OpenAI-compatible routes expose effort choices only when their selected model family supports them",
+    "Gemini and xAI reasoning models now expose their provider-specific supported effort levels"
+  ]
+}

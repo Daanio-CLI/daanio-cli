@@ -43,6 +43,12 @@ pub const DEEPSEEK_SELECTABLE_EFFORTS: &[&str] = &[
     "swarm-deep",
 ];
 
+/// Gemini thinking-budget levels accepted by the OpenAI-compatible gateway.
+pub const GEMINI_SELECTABLE_EFFORTS: &[&str] = &["minimal", "low", "medium", "high"];
+
+/// xAI reasoning levels accepted by Grok reasoning models.
+pub const XAI_SELECTABLE_EFFORTS: &[&str] = &["low", "high"];
+
 /// Convert a provider-advertised OpenAI/OpenRouter effort into the canonical
 /// static value used by the provider trait.
 pub fn canonical_reasoning_effort(value: &str) -> Option<&'static str> {
@@ -73,6 +79,20 @@ pub fn inferred_reasoning_efforts(
 
     if provider.contains("deepseek") || model.contains("deepseek") {
         return DEEPSEEK_SELECTABLE_EFFORTS.to_vec();
+    }
+
+    if provider.contains("gemini") || model.starts_with("gemini-") {
+        return GEMINI_SELECTABLE_EFFORTS.to_vec();
+    }
+
+    let is_xai_reasoning_model =
+        model.starts_with("grok-3-mini") || model.starts_with("grok-4");
+    if provider.contains("xai") || is_xai_reasoning_model {
+        return if is_xai_reasoning_model {
+            XAI_SELECTABLE_EFFORTS.to_vec()
+        } else {
+            Vec::new()
+        };
     }
 
     let is_openai_model = model.starts_with("gpt-")
@@ -163,6 +183,21 @@ mod tests {
                 "swarm",
                 "swarm-deep"
             ]
+        );
+    }
+
+    #[test]
+    fn gemini_and_xai_use_model_specific_effort_ladders() {
+        assert_eq!(
+            inferred_reasoning_efforts(Some("daanio-subscription"), Some("gemini-2.5-pro")),
+            GEMINI_SELECTABLE_EFFORTS
+        );
+        assert_eq!(
+            inferred_reasoning_efforts(Some("daanio-subscription"), Some("grok-4")),
+            XAI_SELECTABLE_EFFORTS
+        );
+        assert!(
+            inferred_reasoning_efforts(Some("daanio-subscription"), Some("grok-2")).is_empty()
         );
     }
 }

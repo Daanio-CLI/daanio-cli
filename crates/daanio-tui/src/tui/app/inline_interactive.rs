@@ -87,10 +87,10 @@ fn route_supports_reasoning_effort(api_method: &str) -> bool {
         | Method::AnthropicApiKey
         | Method::OpenAIOAuth
         | Method::OpenAIApiKey
-        | Method::OpenRouter => true,
-        Method::DaanioSubscription
-        | Method::OpenAiCompatible { .. }
-        | Method::Copilot
+        | Method::OpenRouter
+        | Method::DaanioSubscription
+        | Method::OpenAiCompatible { .. } => true,
+        Method::Copilot
         | Method::Cursor
         | Method::Bedrock
         | Method::CodeAssistOAuth
@@ -3873,13 +3873,14 @@ mod tests {
         assert!(route_supports_reasoning_effort("openai-oauth"));
         assert!(route_supports_reasoning_effort("openai-api-key"));
         assert!(route_supports_reasoning_effort("openrouter"));
+        assert!(route_supports_reasoning_effort("daanio-subscription"));
+        assert!(route_supports_reasoning_effort(
+            "openai-compatible:llamacpp"
+        ));
 
         assert!(!route_supports_reasoning_effort("copilot"));
         assert!(!route_supports_reasoning_effort("bedrock"));
         assert!(!route_supports_reasoning_effort("https"));
-        assert!(!route_supports_reasoning_effort(
-            "openai-compatible:llamacpp"
-        ));
         assert!(!route_supports_reasoning_effort("remote-catalog"));
         assert!(!route_supports_reasoning_effort("current"));
     }
