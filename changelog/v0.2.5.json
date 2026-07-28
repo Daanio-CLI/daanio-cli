@@ -1,0 +1,9 @@
+{
+  "version": "0.2.5",
+  "date": "2026-07-28",
+  "title": "Swarm model inheritance",
+  "fixes": [
+    "Daanio subscription swarm workers now always inherit the coordinator's currently selected model",
+    "Generated per-spawn model values can no longer silently switch Claude coordinators to the default GPT model"
+  ]
+}
