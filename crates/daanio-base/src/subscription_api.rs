@@ -61,11 +61,10 @@ impl SubscriptionMe {
 
     pub fn has_active_paid_plan(&self) -> bool {
         self.status.eq_ignore_ascii_case("active")
-            && (self
-                .billing_mode
-                .as_deref()
-                .is_some_and(|mode| mode.eq_ignore_ascii_case("credits"))
-                || self.parsed_tier().is_some())
+            && (self.billing_mode.as_deref().is_some_and(|mode| {
+                mode.eq_ignore_ascii_case("credits") || mode.eq_ignore_ascii_case("wallet_credits")
+            }) || self.parsed_tier().is_some()
+                || self.usage.budget_usd > 0.0)
     }
 
     pub fn checkout_was_canceled(&self) -> bool {
@@ -688,6 +687,22 @@ mod tests {
             me.credits.as_ref().map(|credits| credits.available_micros),
             Some(4_000_000)
         );
+    }
+
+    #[test]
+    fn wallet_credit_account_is_active_without_a_subscription_tier() {
+        let json = r#"{
+            "account_id":"43",
+            "email":"wallet@example.com",
+            "tier":"none",
+            "status":"active",
+            "billing_mode":"wallet_credits",
+            "usage":{"used_usd":0,"budget_usd":511.365138}
+        }"#;
+        let me: SubscriptionMe = serde_json::from_str(json).expect("parse wallet account");
+        assert_eq!(me.parsed_tier(), None);
+        assert!(me.has_active_paid_plan());
+        assert_eq!(me.usage.budget_usd, 511.365138);
     }
 
     #[test]

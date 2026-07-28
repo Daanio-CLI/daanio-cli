@@ -1,0 +1,10 @@
+{
+  "version": "0.2.11",
+  "date": "2026-07-28",
+  "title": "Wallet credit activation",
+  "fixes": [
+    "Daanio wallet/quota credits now activate the CLI without requiring a subscription tier",
+    "Positive legacy wallet balances remain compatible while new-api reports the explicit wallet_credits billing mode",
+    "Model availability, limits, capabilities, and charging remain authoritative on new-api"
+  ]
+}
