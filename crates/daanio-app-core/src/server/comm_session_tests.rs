@@ -3,8 +3,8 @@
 use super::{
     CoordinatorSpawnIdentity, ensure_spawn_coordinator_swarm, prepare_visible_spawn_session,
     register_visible_spawned_member, require_swarm_spawn_model, resolve_coordinator_spawn_identity,
-    resolve_spawn_working_dir, resolve_stop_target_session, resolve_swarm_spawn_selection,
-    spawn_admission_lock, swarm_stop_allowed_by_owner,
+    resolve_spawn_working_dir, resolve_stop_target_session, resolve_swarm_spawn_effort,
+    resolve_swarm_spawn_selection, spawn_admission_lock, swarm_stop_allowed_by_owner,
 };
 use crate::agent::Agent;
 use crate::message::{Message, ToolDefinition};
