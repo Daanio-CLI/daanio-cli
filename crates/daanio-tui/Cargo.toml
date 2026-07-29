@@ -100,7 +100,6 @@ jemalloc-prof = ["daanio-app-core/jemalloc-prof"]
 embeddings = ["daanio-app-core/embeddings"]
 pdf = ["daanio-app-core/pdf"]
 bedrock = ["daanio-app-core/bedrock"]
-linux-compat-vendored-openssl = ["daanio-app-core/linux-compat-vendored-openssl"]
 mmdr-size-api = ["daanio-tui-mermaid/mmdr-size-api"]
 # Forwards the application core's `test-support` feature (and onward to
 # daanio-base) so downstream crates' test targets can reach the whole stack's

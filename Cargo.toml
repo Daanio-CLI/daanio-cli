@@ -222,9 +222,6 @@ embeddings = ["daanio-tui/embeddings"]
 # Live AWS Bedrock support (the AWS SDK stack) lives in daanio-provider-bedrock;
 # forwards down through daanio-tui -> daanio-app-core -> daanio-base.
 bedrock = ["daanio-tui/bedrock"]
-# Internal release feature: build a supported OpenSSL inside the CentOS 7
-# compatibility image while preserving the glibc 2.17 runtime baseline.
-linux-compat-vendored-openssl = ["daanio-tui/linux-compat-vendored-openssl"]
 mmdr-size-api = ["daanio-tui/mmdr-size-api"]
 pdf = ["daanio-tui/pdf"]
 

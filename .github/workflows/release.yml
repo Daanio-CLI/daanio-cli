@@ -62,6 +62,7 @@ jobs:
   build-linux-macos:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     needs: create-release
     # Each matrix architecture is independent. A failed Linux or macOS target
     # must not suppress assets produced by the other successful targets.
@@ -72,19 +73,34 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
+            container: ubuntu:20.04
+            compat_container: true
             target: x86_64-unknown-linux-gnu
             artifact: daanio-linux-x86_64
           - os: ubuntu-24.04-arm
+            container: ubuntu:20.04
+            compat_container: true
             target: aarch64-unknown-linux-gnu
             artifact: daanio-linux-aarch64
           - os: macos-latest
+            container:
+            compat_container: false
             target: aarch64-apple-darwin
             artifact: daanio-macos-aarch64
           - os: macos-15-intel
+            container:
+            compat_container: false
             target: x86_64-apple-darwin
             artifact: daanio-macos-x86_64
 
     steps:
+      - name: Install Ubuntu 20.04 build dependencies
+        if: matrix.compat_container == true
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential ca-certificates clang cmake curl git perl pkg-config
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -95,6 +111,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Setup sccache
+        if: matrix.compat_container != true
         uses: mozilla-actions/sccache-action@v0.0.7
         continue-on-error: true
         id: sccache
@@ -114,7 +131,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p .cargo
-          if [ "$RUNNER_OS" = "Linux" ]; then
+          if [ "$RUNNER_OS" = "Linux" ] && [ "$COMPAT_CONTAINER" != "true" ]; then
             cat > .cargo/config.toml << 'EOF'
           [target.x86_64-unknown-linux-gnu]
           linker = "clang"
@@ -124,10 +141,25 @@ jobs:
           if command -v sccache &>/dev/null && sccache --start-server 2>/dev/null; then
             export RUSTC_WRAPPER=sccache
           fi
-          cargo build --release --target ${{ matrix.target }}
+          cargo build --locked --release --target ${{ matrix.target }}
         env:
+          COMPAT_CONTAINER: ${{ matrix.compat_container }}
           DAANIO_RELEASE_BUILD: "1"
           DAANIO_BUILD_SEMVER: ${{ github.ref_name }}
+
+      - name: Verify portable Linux dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/daanio"
+          dependencies="$(ldd "$binary")"
+          printf '%s\n' "$dependencies"
+          if grep -Eiq 'libssl|libcrypto' <<<"$dependencies"; then
+            echo "::error::Linux release binary must not depend on system OpenSSL"
+            exit 1
+          fi
+          "$binary" --version
 
       - name: Package binary
         run: |
