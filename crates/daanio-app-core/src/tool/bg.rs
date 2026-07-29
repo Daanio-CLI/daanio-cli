@@ -233,6 +233,18 @@ fn task_metadata(
         "detached": task.detached,
         "progress": task.progress,
         "event_history": task.event_history,
+        "state": task.execution.state,
+        "reason": task.execution.reason,
+        "deadline_at": task.execution.deadline_at,
+        "lease_expires_at": task.execution.lease_expires_at,
+        "last_progress_at": task.execution.last_progress_at,
+        "effective_timeout_ms": task.execution.effective_timeout_ms,
+        "process_container": task.execution.process_container,
+        "graceful_termination_attempted": task.execution.graceful_termination_attempted,
+        "force_kill_required": task.execution.force_kill_required,
+        "descendants_observed": task.execution.descendants_observed,
+        "descendants_remaining": task.execution.descendants_remaining,
+        "output_truncated": task.execution.output_truncated,
         "output_file": manager.output_path_for(&task.task_id).to_string_lossy(),
         "status_file": manager.status_path_for(&task.task_id).to_string_lossy(),
     })
@@ -262,6 +274,15 @@ fn format_task_details(task: &background::TaskStatusFile) -> String {
     }
     if let Some(duration) = task.duration_secs {
         output.push_str(&format!("Duration: {:.2}s\n", duration));
+    }
+    if let Some(deadline) = task.execution.deadline_at.as_deref() {
+        output.push_str(&format!("Deadline: {}\n", deadline));
+    }
+    if let Some(lease) = task.execution.lease_expires_at.as_deref() {
+        output.push_str(&format!("Lease expires: {}\n", lease));
+    }
+    if let Some(state) = task.execution.state.as_deref() {
+        output.push_str(&format!("Execution state: {}\n", state));
     }
     if let Some(exit_code) = task.exit_code {
         output.push_str(&format!("Exit code: {}\n", exit_code));
@@ -623,11 +644,48 @@ impl Tool for BgTool {
                 let task_id = resolve_task_ids(manager, &ctx, &params, "cancel", false)
                     .await?
                     .remove(0);
-                let grace = Duration::from_millis(params.graceful_timeout_ms.unwrap_or(400));
+                let grace = Duration::from_millis(
+                    params
+                        .graceful_timeout_ms
+                        .unwrap_or(crate::execution::DEFAULT_GRACEFUL_TIMEOUT.as_millis() as u64),
+                );
                 match manager.cancel_with_grace(&task_id, grace).await? {
-                    true => Ok(ToolOutput::new(format!("Task {} cancelled.", task_id))
-                        .with_title(format!("bg cancel {}", task_id))
-                        .with_metadata(json!({"task_id": task_id, "cancelled": true, "graceful_timeout_ms": grace.as_millis()}))),
+                    true => {
+                        let task = manager.status(&task_id).await.ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "Task {} cancellation finished but its terminal record is missing",
+                                task_id
+                            )
+                        })?;
+                        let verified = task.execution.state.as_deref() != Some("kill_failed")
+                            && task.execution.descendants_remaining.unwrap_or(0) == 0;
+                        let message = if verified {
+                            format!(
+                                "Task {} cancelled. Graceful termination attempted: {}. Force kill required: {}. Descendants remaining: 0.",
+                                task_id,
+                                task.execution.graceful_termination_attempted,
+                                task.execution.force_kill_required,
+                            )
+                        } else {
+                            format!(
+                                "Task {} cancellation cleanup verification FAILED. Descendants remaining: {}. Backend reconciliation has been requested.",
+                                task_id,
+                                task.execution.descendants_remaining.unwrap_or(0),
+                            )
+                        };
+                        Ok(ToolOutput::new(message)
+                            .with_title(format!("bg cancel {}", task_id))
+                            .with_metadata(json!({
+                                "task_id": task_id,
+                                "cancelled": verified,
+                                "state": task.execution.state,
+                                "graceful_timeout_ms": grace.as_millis(),
+                                "graceful_termination_attempted": task.execution.graceful_termination_attempted,
+                                "force_kill_required": task.execution.force_kill_required,
+                                "descendants_remaining": task.execution.descendants_remaining,
+                                "cleanup_verified": verified,
+                            })))
+                    }
                     false => Err(anyhow::anyhow!(
                         "Task {} not found or already completed.",
                         task_id

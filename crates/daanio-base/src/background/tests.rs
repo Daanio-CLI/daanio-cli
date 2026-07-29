@@ -287,6 +287,7 @@ fn running_status_fixture(task_id: &str, session_id: &str) -> TaskStatusFile {
         wake: false,
         progress: None,
         event_history: Vec::new(),
+        execution: ExecutionTaskMetadata::default(),
     }
 }
 
@@ -559,6 +560,43 @@ async fn abort_live_tasks_for_reload_keeps_naturally_finished_status() -> Result
         status.status,
         BackgroundTaskStatus::Completed,
         "a task that finished before the sweep must keep its real status"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn repeated_cancellation_is_idempotent_and_terminal() -> Result<()> {
+    let tmp = tempdir()?;
+    let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
+    let info = manager
+        .spawn_with_notify(
+            "test-task",
+            Some("silent cancellable task".to_string()),
+            "session-cancel",
+            false,
+            false,
+            |_output_path| async move {
+                sleep(Duration::from_secs(60)).await;
+                Ok(TaskResult::completed(Some(0)))
+            },
+        )
+        .await;
+
+    assert!(manager.cancel(&info.task_id).await?);
+    assert!(
+        !manager.cancel(&info.task_id).await?,
+        "a terminal task must not be cancelled a second time"
+    );
+    let status = manager
+        .status(&info.task_id)
+        .await
+        .ok_or_else(|| anyhow!("cancelled status should exist"))?;
+    assert_eq!(status.status, BackgroundTaskStatus::Failed);
+    assert_eq!(status.execution.state.as_deref(), Some("cancelled"));
+    assert_eq!(
+        status.execution.descendants_remaining.unwrap_or(0),
+        0,
+        "pure in-process cancellation cannot leave OS descendants"
     );
     Ok(())
 }

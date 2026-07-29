@@ -120,6 +120,8 @@ impl McpHandle {
 pub struct McpClient {
     handle: McpHandle,
     child: Child,
+    process_container: crate::execution::ProcessContainer,
+    lifetime_watchdog: tokio::task::JoinHandle<()>,
 }
 
 impl McpClient {
@@ -133,14 +135,25 @@ impl McpClient {
         let mut env: HashMap<String, String> = std::env::vars().collect();
         env.extend(config.env.clone());
 
-        let mut child = Command::new(&config.command)
+        let mut command = Command::new(&config.command);
+        command
             .args(&config.args)
             .envs(&env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        crate::execution::configure_command(&mut command);
+        let mut child = command
             .spawn()
             .with_context(|| format!("Failed to spawn MCP server: {}", config.command))?;
+        let process_container = crate::execution::ProcessContainer::from_child(&child)?;
+        let mut spawn_guard = crate::execution::ProcessTreeGuard::new(process_container.clone());
+        let watchdog_container = process_container.clone();
+        let lifetime_watchdog = tokio::spawn(async move {
+            tokio::time::sleep(crate::execution::DEFAULT_BACKGROUND_MAX_LIFETIME).await;
+            watchdog_container.force_kill_sync();
+        });
 
         let stdin = child.stdin.take().context("No stdin")?;
         let stdout = child.stdout.take().context("No stdout")?;
@@ -236,7 +249,14 @@ impl McpClient {
             tools: Arc::new(std::sync::RwLock::new(Vec::new())),
         };
 
-        let mut client = Self { handle, child };
+        let mut client = Self {
+            handle,
+            child,
+            process_container,
+            lifetime_watchdog,
+        };
+        // McpClient::drop owns cleanup from this point onward.
+        spawn_guard.disarm();
 
         client
             .initialize()
@@ -317,10 +337,24 @@ impl McpClient {
             .writer_tx
             .send("{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\"}\n".to_string())
             .await;
+        // Give the protocol-level shutdown notification a short, bounded chance
+        // to reach the server before escalating to process-tree termination.
+        tokio::time::sleep(Duration::from_millis(100)).await;
 
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-        let _ = self.child.kill().await;
+        let report = crate::execution::terminate_process_tree(
+            &mut self.child,
+            &self.process_container,
+            crate::execution::DEFAULT_GRACEFUL_TIMEOUT,
+            crate::execution::DEFAULT_FORCE_VERIFY_TIMEOUT,
+        )
+        .await;
+        if !report.cleanup_verified {
+            crate::logging::error(&format!(
+                "MCP [{}] process-tree cleanup verification failed: {} descendants remain",
+                self.handle.name, report.descendants_remaining
+            ));
+        }
+        self.lifetime_watchdog.abort();
     }
 
     // === Legacy compatibility methods that delegate to handle ===
@@ -348,6 +382,7 @@ impl McpClient {
 
 impl Drop for McpClient {
     fn drop(&mut self) {
-        let _ = self.child.start_kill();
+        self.lifetime_watchdog.abort();
+        self.process_container.force_kill_sync();
     }
 }

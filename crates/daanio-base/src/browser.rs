@@ -710,12 +710,27 @@ async fn check_browser_ping() -> Result<bool> {
         return Ok(false);
     }
 
-    let output = tokio::process::Command::new(&bin)
-        .arg("ping")
-        .output()
-        .await?;
+    let mut command = tokio::process::Command::new(&bin);
+    command.arg("ping");
+    let output = crate::execution::ExecutionSupervisor::run_to_output(
+        command,
+        crate::execution::EffectiveExecutionPolicy::normalize(
+            crate::execution::ExecutionClass::NetworkProbe,
+            None,
+            None,
+        ),
+        1024 * 1024,
+    )
+    .await?;
+    if output.termination.is_some() {
+        return Ok(false);
+    }
 
-    if output.status.success() {
+    if output
+        .status
+        .as_ref()
+        .is_some_and(|status| status.success())
+    {
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(stdout.contains("pong"))
     } else {
@@ -729,11 +744,21 @@ async fn probe_bridge_action_support(action: &str, params_json: &str) -> Result<
         return Ok(false);
     }
 
-    let output = tokio::process::Command::new(&bin)
-        .arg(action)
-        .arg(params_json)
-        .output()
-        .await?;
+    let mut command = tokio::process::Command::new(&bin);
+    command.arg(action).arg(params_json);
+    let output = crate::execution::ExecutionSupervisor::run_to_output(
+        command,
+        crate::execution::EffectiveExecutionPolicy::normalize(
+            crate::execution::ExecutionClass::NetworkProbe,
+            None,
+            None,
+        ),
+        1024 * 1024,
+    )
+    .await?;
+    if output.termination.is_some() {
+        return Ok(false);
+    }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);

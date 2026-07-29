@@ -60,10 +60,28 @@ fn run_release_tests(repo_dir: &Path) -> Result<()> {
 }
 
 fn run_cargo_release_step(repo_dir: &Path, args: &[&str]) -> Result<ExitStatus> {
-    Ok(ProcessCommand::new("cargo")
-        .args(args)
-        .current_dir(repo_dir)
-        .status()?)
+    let mut command = ProcessCommand::new("cargo");
+    command.args(args).current_dir(repo_dir);
+    let result = crate::execution::ExecutionSupervisor::run_status_blocking(
+        command,
+        crate::execution::EffectiveExecutionPolicy::normalize(
+            crate::execution::ExecutionClass::LongForeground,
+            None,
+            None,
+        ),
+    )?;
+    if let Some(report) = result.termination {
+        anyhow::bail!(
+            "cargo step exceeded its {}ms deadline or left descendants; force kill required: {}; cleanup verified: {}; descendants remaining: {}",
+            result.policy.effective_timeout_ms,
+            report.force_kill_required,
+            report.cleanup_verified,
+            report.descendants_remaining,
+        );
+    }
+    result
+        .status
+        .ok_or_else(|| anyhow::anyhow!("cargo step ended without an exit status"))
 }
 
 fn install_local_release_with_warning(repo_dir: &Path) {

@@ -17,18 +17,6 @@ fn make_ctx(stdin_tx: Option<mpsc::UnboundedSender<StdinInputRequest>>) -> ToolC
     }
 }
 
-fn make_agent_ctx(signal: daanio_agent_runtime::InterruptSignal) -> ToolContext {
-    ToolContext {
-        session_id: "test-session".to_string(),
-        message_id: "test-msg".to_string(),
-        tool_call_id: "test-call-agent".to_string(),
-        working_dir: Some(std::path::PathBuf::from("/tmp")),
-        stdin_request_tx: None,
-        graceful_shutdown_signal: Some(signal),
-        execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
-    }
-}
-
 #[tokio::test]
 async fn test_basic_command_no_stdin() {
     let tool = BashTool::new();
@@ -163,216 +151,99 @@ async fn test_command_timeout_with_stdin_channel() {
     let (tx, _rx) = mpsc::unbounded_channel::<StdinInputRequest>();
     let tool = BashTool::new();
 
-    // `cat` blocks forever on stdin. With a short timeout and no stdin response,
-    // the command should be promoted to the background (kept running), not killed
-    // with an error.
-    let input = json!({"command": "cat", "timeout": 1000});
+    // `cat` blocks forever on stdin. The absolute deadline must terminate it
+    // even though an input channel exists and no output is produced.
+    let input = json!({"command": "cat", "timeout": 100});
     let ctx = make_ctx(Some(tx));
 
     let result = tool
         .execute(input, ctx)
         .await
-        .expect("timeout should promote to background, not error");
+        .expect("timeout should return a structured terminal result");
     assert!(
-        result.output.contains("continuing in background"),
-        "output should explain background promotion: {}",
+        result.output.contains("timed out after 100ms"),
+        "output should explain enforced timeout: {}",
         result.output
     );
-    let metadata = result.metadata.expect("expected background metadata");
-    assert_eq!(metadata["background"], true);
-    assert_eq!(metadata["timeout_promoted"], true);
-    assert_eq!(metadata["foreground_timeout_ms"], 1000);
-
-    // Clean up the still-running background task so it does not linger.
-    let task_id = metadata["task_id"]
-        .as_str()
-        .expect("task_id should be present");
-    let _ = crate::background::global().cancel(task_id).await;
+    let metadata = result.metadata.expect("expected termination metadata");
+    assert_eq!(metadata["state"], "timed_out");
+    assert_eq!(metadata["effective_timeout_ms"], 100);
+    assert_eq!(metadata["descendants_remaining"], 0);
 }
 
 #[tokio::test]
-async fn test_foreground_timeout_promotes_and_command_keeps_running() {
+async fn test_foreground_absolute_timeout_kills_output_producing_process() {
     let tool = BashTool::new();
-    // No stdin channel and Direct mode -> plain foreground path. The command runs
-    // longer than the timeout, so it should be promoted to background and keep
-    // running to completion rather than being killed at the timeout.
-    let input = json!({"command": "sleep 0.5; echo fg_promote_ok", "timeout": 100});
+    let input = json!({
+        "command": "while :; do echo progress; done",
+        "timeout": 100
+    });
     let ctx = make_ctx(None);
 
     let result = tool
         .execute(input, ctx)
         .await
-        .expect("timeout should promote the still-running command to background");
+        .expect("timeout should return a structured result");
     assert!(
-        result.output.contains("continuing in background"),
-        "output should explain background promotion: {}",
+        result.output.contains("timed out after 100ms"),
+        "continuous output must not extend the absolute deadline: {}",
         result.output
     );
-    let metadata = result.metadata.expect("expected background metadata");
-    assert_eq!(metadata["background"], true);
-    assert_eq!(metadata["timeout_promoted"], true);
-    let task_id = metadata["task_id"]
-        .as_str()
-        .expect("task_id should be present")
-        .to_string();
-
-    // Wait for the promoted command to finish on its own.
-    let mut final_status = None;
-    for _ in 0..40 {
-        if let Some(status) = crate::background::global().status(&task_id).await
-            && status.status != BackgroundTaskStatus::Running
-        {
-            final_status = Some(status);
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    let status = final_status.expect("promoted background task should finish");
-    assert_eq!(status.status, BackgroundTaskStatus::Completed);
-
-    let output = crate::background::global()
-        .output(&task_id)
-        .await
-        .expect("output should exist");
-    assert!(
-        output.contains("fg_promote_ok"),
-        "command should have continued after foreground timeout: {output}"
-    );
+    let metadata = result.metadata.expect("expected termination metadata");
+    assert_eq!(metadata["state"], "timed_out");
+    assert_eq!(metadata["descendants_remaining"], 0);
 }
 
 #[tokio::test]
-async fn test_reload_persistable_bash_continues_in_background() {
+async fn test_foreground_timeout_force_kills_signal_ignoring_tree() {
     let tool = BashTool::new();
-    let signal = daanio_agent_runtime::InterruptSignal::new();
-    let ctx = make_agent_ctx(signal.clone());
-
-    let signal_task = tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        signal.fire();
-    });
-
+    let ctx = make_ctx(None);
     let result = tool
         .execute(
-            json!({"command": "sleep 1; echo reload_persist_ok", "timeout": 10000}),
+            json!({
+                "command": "trap '' TERM; (trap '' TERM; while :; do sleep 1; done) & while :; do sleep 1; done",
+                "timeout": 100
+            }),
             ctx,
         )
         .await
-        .expect("reload-persistable command should succeed");
-    signal_task.await.expect("signal task should complete");
-
-    let metadata = result.metadata.expect("expected background metadata");
-    assert_eq!(metadata["background"], true);
-    assert_eq!(metadata["reload_persisted"], true);
-    let task_id = metadata["task_id"]
-        .as_str()
-        .expect("task_id should be present")
-        .to_string();
-    let output_file = std::path::PathBuf::from(
-        metadata["output_file"]
-            .as_str()
-            .expect("output_file should be present"),
-    );
-    let status_file = std::path::PathBuf::from(
-        metadata["status_file"]
-            .as_str()
-            .expect("status_file should be present"),
-    );
-
-    tokio::time::sleep(std::time::Duration::from_millis(1400)).await;
-
-    let status = crate::background::global()
-        .status(&task_id)
-        .await
-        .expect("status should exist");
-    assert_eq!(status.status, BackgroundTaskStatus::Completed);
-    let output = crate::background::global()
-        .output(&task_id)
-        .await
-        .expect("output should exist");
-    assert!(output.contains("reload_persist_ok"), "output was: {output}");
-
-    let _ = tokio::fs::remove_file(output_file).await;
-    let _ = tokio::fs::remove_file(status_file).await;
+        .expect("timeout should return a structured result");
+    let metadata = result.metadata.expect("expected termination metadata");
+    assert_eq!(metadata["state"], "timed_out");
+    assert_eq!(metadata["force_kill_required"], true);
+    assert_eq!(metadata["descendants_remaining"], 0);
 }
 
 #[tokio::test]
-async fn test_reload_persistable_bash_timeout_promotes_to_background() {
+async fn test_root_exit_cleans_surviving_descendant() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let pid_file = temp.path().join("child.pid");
     let tool = BashTool::new();
-    let signal = daanio_agent_runtime::InterruptSignal::new();
-    let ctx = make_agent_ctx(signal);
-
+    let ctx = make_ctx(None);
+    let command = format!(
+        "sleep 30 </dev/null >/dev/null 2>&1 & echo $! > '{}'",
+        pid_file.display()
+    );
     let result = tool
-        .execute(
-            json!({"command": "sleep 0.4; echo timeout_promote_ok", "timeout": 100}),
-            ctx,
-        )
+        .execute(json!({"command": command, "timeout": 5000}), ctx)
         .await
-        .expect("timeout should promote the still-running command to background");
-
+        .expect("root command should complete after descendant cleanup");
+    assert_eq!(
+        result
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata["completion_cleanup_required"].as_bool()),
+        Some(true)
+    );
+    let pid: u32 = std::fs::read_to_string(pid_file)
+        .expect("pid file")
+        .trim()
+        .parse()
+        .expect("child pid");
     assert!(
-        result.output.contains("continuing in background"),
-        "output should explain background promotion: {}",
-        result.output
+        !crate::platform::is_process_running(pid),
+        "owned descendant must not survive root completion"
     );
-    assert!(
-        result.output.contains("do not rerun"),
-        "output should tell the agent not to rerun duplicate work: {}",
-        result.output
-    );
-
-    let metadata = result.metadata.expect("expected background metadata");
-    assert_eq!(metadata["background"], true);
-    assert_eq!(metadata["timeout_promoted"], true);
-    assert_eq!(metadata["foreground_timeout_ms"], 100);
-    let task_id = metadata["task_id"]
-        .as_str()
-        .expect("task_id should be present")
-        .to_string();
-    let output_file = std::path::PathBuf::from(
-        metadata["output_file"]
-            .as_str()
-            .expect("output_file should be present"),
-    );
-    let status_file = std::path::PathBuf::from(
-        metadata["status_file"]
-            .as_str()
-            .expect("status_file should be present"),
-    );
-
-    let initial_status = crate::background::global()
-        .status(&task_id)
-        .await
-        .expect("status should exist");
-    assert_eq!(initial_status.status, BackgroundTaskStatus::Running);
-
-    let mut final_status = None;
-    for _ in 0..40 {
-        let status = crate::background::global()
-            .status(&task_id)
-            .await
-            .expect("status should exist");
-        if status.status != BackgroundTaskStatus::Running {
-            final_status = Some(status);
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-
-    let status = final_status.expect("promoted background task should finish");
-    assert_eq!(status.status, BackgroundTaskStatus::Completed);
-    assert_eq!(status.exit_code, Some(0));
-
-    let output = crate::background::global()
-        .output(&task_id)
-        .await
-        .expect("output should exist");
-    assert!(
-        output.contains("timeout_promote_ok"),
-        "command should have continued after foreground timeout: {output}"
-    );
-
-    let _ = tokio::fs::remove_file(output_file).await;
-    let _ = tokio::fs::remove_file(status_file).await;
 }
 
 #[tokio::test]
@@ -664,6 +535,13 @@ async fn test_background_command_respects_timeout() {
 
     let status = final_status.expect("background task should fail after timeout");
     assert_eq!(status.exit_code, Some(124));
+    assert_eq!(status.execution.state.as_deref(), Some("timed_out"));
+    assert_eq!(
+        status.execution.reason.as_deref(),
+        Some("absolute_deadline_exceeded")
+    );
+    assert_eq!(status.execution.descendants_remaining, Some(0));
+    assert_eq!(status.execution.effective_timeout_ms, Some(100));
     assert!(
         status
             .error
@@ -688,7 +566,43 @@ async fn test_background_command_respects_timeout() {
 }
 
 #[tokio::test]
-async fn test_background_command_without_timeout_keeps_running_past_default_foreground_timeout() {
+async fn foreground_user_cancellation_waits_for_verified_tree_cleanup() {
+    let signal = daanio_agent_runtime::InterruptSignal::new();
+    let mut ctx = make_ctx(None);
+    ctx.graceful_shutdown_signal = Some(signal.clone());
+    let execution = tokio::spawn(async move {
+        BashTool::new()
+            .execute(
+                json!({
+                    "command": "trap '' TERM; (trap '' TERM; sleep 60) & sleep 60",
+                    "timeout": 60_000,
+                    "graceful_timeout_ms": 50,
+                }),
+                ctx,
+            )
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    signal.fire();
+
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), execution)
+        .await
+        .expect("cancellation should finish")
+        .expect("tool task should join")
+        .expect("tool should return a terminal result");
+    let metadata = result.metadata.expect("termination metadata");
+    assert_eq!(metadata["state"], "cancelled");
+    assert_eq!(metadata["reason"], "user_cancelled");
+    assert_eq!(metadata["descendants_remaining"], 0);
+    assert!(
+        result.output.contains("Command cancelled"),
+        "output should explain verified cancellation: {}",
+        result.output
+    );
+}
+
+#[tokio::test]
+async fn test_background_command_without_timeout_receives_bounded_default() {
     let tool = BashTool::new();
     let ctx = make_ctx(None);
 
@@ -706,6 +620,11 @@ async fn test_background_command_without_timeout_keeps_running_past_default_fore
         .expect("background command should start");
 
     let metadata = result.metadata.expect("expected metadata");
+    assert_eq!(metadata["effective_timeout_ms"], 86_400_000);
+    assert!(
+        metadata["deadline_at"].as_str().is_some(),
+        "backend must return the effective deadline"
+    );
     let task_id = metadata["task_id"]
         .as_str()
         .expect("task id should be present")

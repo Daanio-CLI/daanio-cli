@@ -142,16 +142,24 @@ async fn wait_for_platform_change_or_delay(delay: Duration) {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 async fn command_exists(command: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!(
-            "command -v {} >/dev/null 2>&1",
-            shell_escape(command)
-        ))
-        .status()
-        .await
-        .map(|status| status.success())
-        .unwrap_or(false)
+    let mut probe = Command::new("sh");
+    probe.arg("-c").arg(format!(
+        "command -v {} >/dev/null 2>&1",
+        shell_escape(command)
+    ));
+    crate::execution::ExecutionSupervisor::run_to_output(
+        probe,
+        crate::execution::EffectiveExecutionPolicy::normalize(
+            crate::execution::ExecutionClass::NetworkProbe,
+            None,
+            None,
+        ),
+        64 * 1024,
+    )
+    .await
+    .ok()
+    .and_then(|output| output.status)
+    .is_some_and(|status| status.success())
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -167,16 +175,31 @@ async fn wait_for_command_output(command: &str, args: &[&str]) {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
+    crate::execution::configure_command(&mut command_builder);
     let mut child = match command_builder.spawn() {
         Ok(child) => child,
         Err(_) => return,
     };
+    let Ok(container) = crate::execution::ProcessContainer::from_child(&child) else {
+        let _ = child.kill().await;
+        return;
+    };
+    let mut process_guard = crate::execution::ProcessTreeGuard::new(container.clone());
     if let Some(mut stdout) = child.stdout.take() {
         use tokio::io::AsyncReadExt;
         let mut buf = [0u8; 1];
         let _ = stdout.read(&mut buf).await;
     }
-    let _ = child.kill().await;
+    let report = crate::execution::terminate_process_tree(
+        &mut child,
+        &container,
+        crate::execution::DEFAULT_GRACEFUL_TIMEOUT,
+        crate::execution::DEFAULT_FORCE_VERIFY_TIMEOUT,
+    )
+    .await;
+    if report.cleanup_verified {
+        process_guard.disarm();
+    }
 }
 
 #[cfg(test)]
