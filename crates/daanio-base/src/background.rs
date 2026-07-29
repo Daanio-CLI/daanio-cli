@@ -23,7 +23,7 @@ mod model;
 
 pub use model::{
     BackgroundCleanupResult, BackgroundTaskEventKind, BackgroundTaskEventRecord,
-    BackgroundTaskInfo, BackgroundTaskWaitReason, BackgroundTaskWaitResult, ExecutionTaskMetadata,
+    BackgroundTaskInfo, BackgroundTaskWaitReason, BackgroundTaskWaitResult,
     RunningBackgroundProgress, TaskResult, TaskStatusFile, format_progress_display,
     format_progress_summary, render_progress_bar,
 };
@@ -39,162 +39,6 @@ pub struct BackgroundTaskManager {
 }
 
 impl BackgroundTaskManager {
-    fn process_container_from_status(
-        status: &TaskStatusFile,
-    ) -> Option<crate::execution::ProcessContainer> {
-        let root_pid = status.execution.root_pid.or(status.pid)?;
-        let kind = match status.execution.process_container.as_deref() {
-            Some("process_group") => crate::execution::ProcessContainerKind::ProcessGroup,
-            Some("job_object") => crate::execution::ProcessContainerKind::WindowsJobObject,
-            Some("windows_process_tree") => {
-                crate::execution::ProcessContainerKind::WindowsProcessTree
-            }
-            _ if cfg!(unix) => crate::execution::ProcessContainerKind::ProcessGroup,
-            _ => crate::execution::ProcessContainerKind::WindowsProcessTree,
-        };
-        let process_group_id = status.execution.process_group_id.or_else(|| {
-            matches!(&kind, crate::execution::ProcessContainerKind::ProcessGroup)
-                .then_some(root_pid)
-        });
-        Some(crate::execution::ProcessContainer::from_persisted(
-            kind,
-            root_pid,
-            process_group_id,
-            status.execution.process_start_token.clone(),
-        ))
-    }
-
-    fn launch_deadline_watchdog(
-        &self,
-        task_id: String,
-        mut lease_rx: watch::Receiver<TokioInstant>,
-        absolute_deadline: TokioInstant,
-    ) {
-        let manager = Self {
-            tasks: Arc::clone(&self.tasks),
-            output_dir: self.output_dir.clone(),
-        };
-        tokio::spawn(async move {
-            loop {
-                let lease_deadline = *lease_rx.borrow();
-                let next_deadline = lease_deadline.min(absolute_deadline);
-                tokio::select! {
-                    _ = tokio::time::sleep_until(next_deadline) => {
-                        let now = TokioInstant::now();
-                        let reason = if now >= absolute_deadline {
-                            "absolute_deadline_exceeded"
-                        } else {
-                            "lease_expired"
-                        };
-                        if manager
-                            .cancel_with_grace(
-                                &task_id,
-                                crate::execution::DEFAULT_GRACEFUL_TIMEOUT,
-                            )
-                            .await
-                            .unwrap_or(false)
-                            && let Some(mut status) = manager.status(&task_id).await
-                        {
-                            status.execution.state = Some(if status
-                                .execution
-                                .descendants_remaining
-                                .unwrap_or(0)
-                                == 0
-                            {
-                                "timed_out".to_string()
-                            } else {
-                                "kill_failed".to_string()
-                            });
-                            status.execution.reason = Some(reason.to_string());
-                            status.error = Some(match reason {
-                                "lease_expired" => {
-                                    "Background task lease expired; process tree terminated"
-                                        .to_string()
-                                }
-                                _ => "Absolute execution deadline exceeded; process tree terminated"
-                                    .to_string(),
-                            });
-                            manager
-                                .write_status_file(&manager.status_path_for(&task_id), &status)
-                                .await;
-                        }
-                        break;
-                    }
-                    changed = lease_rx.changed() => {
-                        if changed.is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    fn schedule_kill_reconciliation(&self, task_id: String) {
-        let manager = Self {
-            tasks: Arc::clone(&self.tasks),
-            output_dir: self.output_dir.clone(),
-        };
-        tokio::spawn(async move {
-            for delay in [1_u64, 5, 30] {
-                tokio::time::sleep(Duration::from_secs(delay)).await;
-                let status_path = manager.status_path_for(&task_id);
-                let Some(mut status) = manager.read_status_file(&status_path).await else {
-                    return;
-                };
-                if status.execution.state.as_deref() != Some("kill_failed") {
-                    return;
-                }
-                let Some(container) = Self::process_container_from_status(&status) else {
-                    return;
-                };
-                let report = crate::execution::terminate_process_container(
-                    &container,
-                    crate::execution::DEFAULT_GRACEFUL_TIMEOUT,
-                    crate::execution::DEFAULT_FORCE_VERIFY_TIMEOUT,
-                )
-                .await;
-                if report.cleanup_verified {
-                    status.execution.state = Some(
-                        match status.execution.reason.as_deref() {
-                            Some("user_cancelled") => "cancelled",
-                            Some("absolute_deadline_exceeded") | Some("lease_expired") => {
-                                "timed_out"
-                            }
-                            Some("backend_interrupted") => "orphan_reaped",
-                            _ => "killed",
-                        }
-                        .to_string(),
-                    );
-                    status.execution.finished_at = Some(Utc::now().to_rfc3339());
-                    status.execution.graceful_termination_attempted =
-                        report.graceful_termination_attempted;
-                    status.execution.force_kill_required = report.force_kill_required;
-                    status.execution.descendants_observed = Some(report.descendants_observed);
-                    status.execution.descendants_remaining = Some(0);
-                    manager.write_status_file(&status_path, &status).await;
-                    crate::execution::record_event(
-                        "reconciliation_succeeded",
-                        Some(&task_id),
-                        None,
-                        Some(&container),
-                        status.execution.reason.as_deref(),
-                        Some(&report),
-                    );
-                    return;
-                }
-            }
-            crate::execution::record_event(
-                "reconciliation_exhausted",
-                Some(&task_id),
-                None,
-                None,
-                Some("cleanup_verification_failed"),
-                None,
-            );
-        });
-    }
-
     /// Create a manager rooted at a specific output directory.
     ///
     /// Primarily for tests; production code should use [`global`].
@@ -385,13 +229,10 @@ impl BackgroundTaskManager {
     ///   alone; only the explicit startup sweep in
     ///   [`Self::reconcile_orphaned_tasks`] handles those.
     fn status_is_reconcilable_orphan(status: &TaskStatusFile) -> bool {
-        if status.status != BackgroundTaskStatus::Running || status.detached {
+        if status.status != BackgroundTaskStatus::Running || status.detached || status.pid.is_some()
+        {
             return false;
         }
-        Self::owner_image_is_interrupted(status)
-    }
-
-    fn owner_image_is_interrupted(status: &TaskStatusFile) -> bool {
         let Some(owner_pid) = status.owner_pid else {
             return false;
         };
@@ -423,66 +264,21 @@ impl BackgroundTaskManager {
             return status;
         }
 
-        let termination_started_at = Utc::now();
-        let termination_report =
-            if let Some(container) = Self::process_container_from_status(&status) {
-                Some(
-                    crate::execution::terminate_process_container(
-                        &container,
-                        crate::execution::DEFAULT_GRACEFUL_TIMEOUT,
-                        crate::execution::DEFAULT_FORCE_VERIFY_TIMEOUT,
-                    )
-                    .await,
-                )
-            } else {
-                None
-            };
-        let cleanup_verified = termination_report
-            .as_ref()
-            .map(|report| report.cleanup_verified)
-            .unwrap_or(false);
         let completed_at = Utc::now();
         let duration_secs = Self::status_duration_secs(&status.started_at, completed_at);
-        let error = if cleanup_verified {
-            "Task orphaned because the backend reloaded or was interrupted; owned process tree was reaped"
-                .to_string()
-        } else if termination_report.is_some() {
-            "Task orphaned because the backend reloaded or was interrupted; process-tree cleanup could not be verified".to_string()
-        } else {
-            "Task orphaned because the backend reloaded or was interrupted; no process identity was persisted, so safe cleanup could not be verified".to_string()
-        };
+        let error =
+            "Task orphaned: the owning server process exited (reloaded or crashed) before the task finished"
+                .to_string();
         status.status = BackgroundTaskStatus::Failed;
         status.exit_code = None;
         status.error = Some(error.clone());
         status.completed_at = Some(completed_at.to_rfc3339());
         status.duration_secs = duration_secs;
-        status.execution.state = Some(if cleanup_verified {
-            "orphan_reaped".to_string()
-        } else {
-            "kill_failed".to_string()
-        });
-        status.execution.reason = Some("backend_interrupted".to_string());
-        status.execution.termination_started_at = Some(termination_started_at.to_rfc3339());
-        status.execution.finished_at = Some(completed_at.to_rfc3339());
-        if let Some(report) = termination_report.as_ref() {
-            status.execution.graceful_termination_attempted = report.graceful_termination_attempted;
-            status.execution.force_kill_required = report.force_kill_required;
-            status.execution.descendants_observed = Some(report.descendants_observed);
-            status.execution.descendants_remaining = Some(report.descendants_remaining);
-        }
         push_task_event(
             &mut status,
             terminal_event_record(BackgroundTaskStatus::Failed, None, Some(&error)),
         );
         self.write_status_file(status_path, &status).await;
-        crate::execution::record_event(
-            "startup_reconciliation",
-            Some(&status.task_id),
-            None,
-            Self::process_container_from_status(&status).as_ref(),
-            Some("backend_interrupted"),
-            termination_report.as_ref(),
-        );
 
         let output_path = self.output_path_for(&status.task_id);
         let output = fs::read_to_string(&output_path).await.unwrap_or_default();
@@ -531,68 +327,6 @@ impl BackgroundTaskManager {
             let Some(status) = self.read_status_file(&path).await else {
                 continue;
             };
-            if status.status == BackgroundTaskStatus::Running
-                && status.detached
-                && Self::owner_image_is_interrupted(&status)
-            {
-                let mut recovered = status;
-                let termination_started_at = Utc::now();
-                let report =
-                    Self::process_container_from_status(&recovered).map(|container| async move {
-                        crate::execution::terminate_process_container(
-                            &container,
-                            crate::execution::DEFAULT_GRACEFUL_TIMEOUT,
-                            crate::execution::DEFAULT_FORCE_VERIFY_TIMEOUT,
-                        )
-                        .await
-                    });
-                let report = match report {
-                    Some(future) => Some(future.await),
-                    None => None,
-                };
-                let cleanup_verified = report
-                    .as_ref()
-                    .map(|report| report.cleanup_verified)
-                    .unwrap_or(false);
-                let finished_at = Utc::now();
-                recovered.status = BackgroundTaskStatus::Failed;
-                recovered.error = Some(if cleanup_verified {
-                    "Detached ordinary task was reaped during backend startup recovery".to_string()
-                } else {
-                    "Detached task cleanup could not be verified during backend startup recovery"
-                        .to_string()
-                });
-                recovered.completed_at = Some(finished_at.to_rfc3339());
-                recovered.duration_secs =
-                    Self::status_duration_secs(&recovered.started_at, finished_at);
-                recovered.execution.state = Some(if cleanup_verified {
-                    "orphan_reaped".to_string()
-                } else {
-                    "kill_failed".to_string()
-                });
-                recovered.execution.reason = Some("backend_interrupted".to_string());
-                recovered.execution.termination_started_at =
-                    Some(termination_started_at.to_rfc3339());
-                recovered.execution.finished_at = Some(finished_at.to_rfc3339());
-                if let Some(report) = report {
-                    recovered.execution.graceful_termination_attempted =
-                        report.graceful_termination_attempted;
-                    recovered.execution.force_kill_required = report.force_kill_required;
-                    recovered.execution.descendants_observed = Some(report.descendants_observed);
-                    recovered.execution.descendants_remaining = Some(report.descendants_remaining);
-                }
-                self.write_status_file(&path, &recovered).await;
-                crate::execution::record_event(
-                    "startup_reconciliation",
-                    Some(&recovered.task_id),
-                    None,
-                    Self::process_container_from_status(&recovered).as_ref(),
-                    Some("backend_interrupted"),
-                    None,
-                );
-                reconciled += 1;
-                continue;
-            }
             if !Self::status_is_reconcilable_orphan(&status) {
                 continue;
             }
@@ -616,48 +350,6 @@ impl BackgroundTaskManager {
         }
     }
 
-    /// Persist the OS process-container identity immediately after spawn.
-    ///
-    /// This record lets cancellation and startup reconciliation target only the
-    /// task-owned group and reject a later process that merely reused the PID.
-    pub async fn register_process_container(
-        &self,
-        task_id: &str,
-        container: &crate::execution::ProcessContainer,
-    ) -> Result<()> {
-        let status_path = self.status_path_for(task_id);
-        let Some(mut status) = self.read_status_file(&status_path).await else {
-            anyhow::bail!("background task status disappeared before process registration");
-        };
-        if status.status != BackgroundTaskStatus::Running {
-            anyhow::bail!("cannot register a process container for a terminal task");
-        }
-        status.pid = Some(container.root_pid);
-        status.execution.root_pid = Some(container.root_pid);
-        status.execution.process_group_id = container.process_group_id;
-        status.execution.process_start_token = container.process_start_token.clone();
-        status.execution.process_container = Some(
-            match container.kind {
-                crate::execution::ProcessContainerKind::ProcessGroup => "process_group",
-                crate::execution::ProcessContainerKind::WindowsJobObject => "job_object",
-                crate::execution::ProcessContainerKind::WindowsProcessTree => {
-                    "windows_process_tree"
-                }
-            }
-            .to_string(),
-        );
-        self.write_status_file(&status_path, &status).await;
-        crate::execution::record_event(
-            "spawn_succeeded",
-            Some(task_id),
-            None,
-            Some(container),
-            None,
-            None,
-        );
-        Ok(())
-    }
-
     #[expect(
         clippy::too_many_arguments,
         reason = "Detached task registration mirrors persisted status fields and existing call sites"
@@ -674,16 +366,6 @@ impl BackgroundTaskManager {
         wake: bool,
     ) {
         let (notify, wake) = normalize_delivery(notify, wake);
-        let policy = crate::execution::EffectiveExecutionPolicy::normalize(
-            crate::execution::ExecutionClass::Background,
-            None,
-            None,
-        );
-        let container = crate::execution::ProcessContainer::from_pid(pid);
-        let mut execution = ExecutionTaskMetadata::from_policy(&policy);
-        execution.root_pid = Some(pid);
-        execution.process_group_id = container.process_group_id;
-        execution.process_start_token = container.process_start_token;
         let status = TaskStatusFile {
             task_id: info.task_id.clone(),
             tool_name: tool_name.to_string(),
@@ -696,17 +378,15 @@ impl BackgroundTaskManager {
             completed_at: None,
             duration_secs: None,
             pid: Some(pid),
-            // The backend, not the initiating CLI connection, owns the task.
-            // Persist the exact backend process image so a later backend can
-            // reconcile it without touching another live instance's work.
-            owner_pid: Some(std::process::id()),
-            owner_instance: Some(model::process_instance_token().to_string()),
+            // Detached processes outlive this server, so no in-process owner:
+            // reconciliation must never clobber them.
+            owner_pid: None,
+            owner_instance: None,
             detached: true,
             notify,
             wake,
             progress: None,
             event_history: Vec::new(),
-            execution,
         };
         self.write_status_file(&info.status_file, &status).await;
         Self::publish_task_started_activity(
@@ -716,29 +396,6 @@ impl BackgroundTaskManager {
             session_id,
             notify,
         );
-
-        // Detached does not mean unbounded. Keep the deadline in the backend
-        // even when the initiating CLI disconnects.
-        let watchdog = Self {
-            tasks: Arc::clone(&self.tasks),
-            output_dir: self.output_dir.clone(),
-        };
-        let watchdog_task_id = info.task_id.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(policy.timeout()).await;
-            if watchdog
-                .status(&watchdog_task_id)
-                .await
-                .is_some_and(|status| status.status == BackgroundTaskStatus::Running)
-            {
-                let _ = watchdog
-                    .cancel_with_grace(
-                        &watchdog_task_id,
-                        crate::execution::DEFAULT_GRACEFUL_TIMEOUT,
-                    )
-                    .await;
-            }
-        });
     }
 
     /// Spawn a background task
@@ -773,45 +430,6 @@ impl BackgroundTaskManager {
         F: FnOnce(PathBuf) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<TaskResult>> + Send,
     {
-        let policy = crate::execution::EffectiveExecutionPolicy::normalize(
-            crate::execution::ExecutionClass::Background,
-            None,
-            None,
-        );
-        self.spawn_with_notify_and_policy(
-            tool_name,
-            display_name,
-            session_id,
-            notify,
-            wake,
-            policy,
-            execute_fn,
-        )
-        .await
-    }
-
-    /// Spawn a background task with a backend-normalized execution policy.
-    ///
-    /// The effective deadline is persisted before `execute_fn` runs so clients
-    /// can disconnect without losing the backend's ownership record.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "task identity, delivery, policy, and execution closure are independent inputs"
-    )]
-    pub async fn spawn_with_notify_and_policy<F, Fut>(
-        &self,
-        tool_name: &str,
-        display_name: Option<String>,
-        session_id: &str,
-        notify: bool,
-        wake: bool,
-        policy: crate::execution::EffectiveExecutionPolicy,
-        execute_fn: F,
-    ) -> BackgroundTaskInfo
-    where
-        F: FnOnce(PathBuf) -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = Result<TaskResult>> + Send,
-    {
         let (notify, wake) = normalize_delivery(notify, wake);
         let task_id = Self::generate_task_id();
         let output_path = self.output_dir.join(format!("{}.output", task_id));
@@ -838,27 +456,10 @@ impl BackgroundTaskManager {
             wake,
             progress: None,
             event_history: Vec::new(),
-            execution: ExecutionTaskMetadata::from_policy(&policy),
         };
         if let Ok(json) = serde_json::to_string_pretty(&initial_status) {
             let _ = std::fs::write(&status_path, json);
         }
-        crate::execution::record_event(
-            "spawn_requested",
-            Some(&task_id),
-            Some(&policy),
-            None,
-            None,
-            None,
-        );
-        crate::execution::record_event(
-            "effective_deadline_assigned",
-            Some(&task_id),
-            Some(&policy),
-            None,
-            None,
-            None,
-        );
         Self::publish_task_started_activity(
             &task_id,
             tool_name,
@@ -876,15 +477,7 @@ impl BackgroundTaskManager {
         let started_at = Instant::now();
         let started_at_rfc3339_for_task = started_at_rfc3339.clone();
         let (delivery_flags_tx, delivery_flags_rx) = watch::channel((notify, wake));
-        let absolute_deadline = TokioInstant::now() + policy.timeout();
-        let initial_lease_deadline = TokioInstant::now()
-            + policy
-                .timeout()
-                .min(crate::execution::DEFAULT_BACKGROUND_LEASE);
-        let (lease_deadline_tx, lease_deadline_rx) = watch::channel(initial_lease_deadline);
         let tasks_for_prune = Arc::clone(&self.tasks);
-        let tasks_for_reconcile = Arc::clone(&self.tasks);
-        let output_dir_for_reconcile = self.output_dir.clone();
         let (registered_tx, registered_rx) = tokio::sync::oneshot::channel::<()>();
 
         // Spawn the background task
@@ -892,7 +485,7 @@ impl BackgroundTaskManager {
             let result = execute_fn(output_path_clone.clone()).await;
 
             let duration_secs = started_at.elapsed().as_secs_f64();
-            let (status, exit_code, error, execution_state, termination_report) = match &result {
+            let (status, exit_code, error) = match &result {
                 Ok(task_result) => {
                     let status = task_result.status.clone().unwrap_or_else(|| {
                         if task_result.error.is_some() {
@@ -901,21 +494,9 @@ impl BackgroundTaskManager {
                             BackgroundTaskStatus::Completed
                         }
                     });
-                    (
-                        status,
-                        task_result.exit_code,
-                        task_result.error.clone(),
-                        task_result.execution_state.clone(),
-                        task_result.termination_report.clone(),
-                    )
+                    (status, task_result.exit_code, task_result.error.clone())
                 }
-                Err(e) => (
-                    BackgroundTaskStatus::Failed,
-                    None,
-                    Some(e.to_string()),
-                    Some("failed".to_string()),
-                    None,
-                ),
+                Err(e) => (BackgroundTaskStatus::Failed, None, Some(e.to_string())),
             };
 
             let (notify_flag, wake_flag) = *delivery_flags_rx.borrow();
@@ -927,28 +508,8 @@ impl BackgroundTaskManager {
                 .as_ref()
                 .and_then(|status| status.progress.clone());
             let prior_event_history = prior_status
-                .as_ref()
-                .map(|status| status.event_history.clone())
+                .map(|status| status.event_history)
                 .unwrap_or_default();
-            let prior_execution = prior_status
-                .as_ref()
-                .map(|status| status.execution.clone())
-                .unwrap_or_default();
-            let mut final_execution = prior_execution;
-            final_execution.state = execution_state;
-            final_execution.finished_at = Some(chrono::Utc::now().to_rfc3339());
-            final_execution.reason = match final_execution.state.as_deref() {
-                Some("timed_out") => Some("absolute_deadline_exceeded".to_string()),
-                Some("kill_failed") => Some("cleanup_verification_failed".to_string()),
-                _ => final_execution.reason,
-            };
-            if let Some(report) = termination_report {
-                final_execution.graceful_termination_attempted =
-                    report.graceful_termination_attempted;
-                final_execution.force_kill_required = report.force_kill_required;
-                final_execution.descendants_observed = Some(report.descendants_observed);
-                final_execution.descendants_remaining = Some(report.descendants_remaining);
-            }
 
             // Update status file
             let mut final_status = TaskStatusFile {
@@ -970,7 +531,6 @@ impl BackgroundTaskManager {
                 wake: wake_flag,
                 progress: prior_progress,
                 event_history: prior_event_history,
-                execution: final_execution,
             };
             push_task_event(
                 &mut final_status,
@@ -978,13 +538,6 @@ impl BackgroundTaskManager {
             );
             if let Ok(json) = serde_json::to_string_pretty(&final_status) {
                 let _ = tokio::fs::write(&status_path_clone, json).await;
-            }
-            if final_status.execution.state.as_deref() == Some("kill_failed") {
-                Self {
-                    tasks: tasks_for_reconcile,
-                    output_dir: output_dir_for_reconcile,
-                }
-                .schedule_kill_reconciliation(task_id_clone.clone());
             }
 
             // Drop this task from the live map now that its terminal status is
@@ -1038,8 +591,6 @@ impl BackgroundTaskManager {
             started_at,
             started_at_rfc3339,
             delivery_flags: delivery_flags_tx,
-            lease_deadline: lease_deadline_tx,
-            absolute_deadline,
             handle,
         };
 
@@ -1048,7 +599,6 @@ impl BackgroundTaskManager {
             .await
             .insert(task_id.clone(), running_task);
         let _ = registered_tx.send(());
-        self.launch_deadline_watchdog(task_id.clone(), lease_deadline_rx, absolute_deadline);
 
         BackgroundTaskInfo {
             task_id,
@@ -1085,11 +635,6 @@ impl BackgroundTaskManager {
         handle: JoinHandle<Result<daanio_tool_types::ToolOutput>>,
     ) -> BackgroundTaskInfo {
         let (notify, wake) = normalize_delivery(notify, wake);
-        let policy = crate::execution::EffectiveExecutionPolicy::normalize(
-            crate::execution::ExecutionClass::Background,
-            None,
-            None,
-        );
         let task_id = Self::generate_task_id();
         let output_path = self.output_dir.join(format!("{}.output", task_id));
         let status_path = self.output_dir.join(format!("{}.status.json", task_id));
@@ -1113,7 +658,6 @@ impl BackgroundTaskManager {
             wake,
             progress: None,
             event_history: Vec::new(),
-            execution: ExecutionTaskMetadata::from_policy(&policy),
         };
         if let Ok(json) = serde_json::to_string_pretty(&initial_status) {
             let _ = std::fs::write(&status_path, json);
@@ -1135,12 +679,6 @@ impl BackgroundTaskManager {
         let started_at_rfc3339 = initial_status.started_at.clone();
         let display_name_owned = initial_status.display_name.clone();
         let (delivery_flags_tx, delivery_flags_rx) = watch::channel((notify, wake));
-        let absolute_deadline = TokioInstant::now() + policy.timeout();
-        let initial_lease_deadline = TokioInstant::now()
-            + policy
-                .timeout()
-                .min(crate::execution::DEFAULT_BACKGROUND_LEASE);
-        let (lease_deadline_tx, lease_deadline_rx) = watch::channel(initial_lease_deadline);
         let tasks_for_prune = Arc::clone(&self.tasks);
         let (registered_tx, registered_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -1182,12 +720,7 @@ impl BackgroundTaskManager {
                 .as_ref()
                 .and_then(|status| status.progress.clone());
             let prior_event_history = prior_status
-                .as_ref()
-                .map(|status| status.event_history.clone())
-                .unwrap_or_default();
-            let prior_execution = prior_status
-                .as_ref()
-                .map(|status| status.execution.clone())
+                .map(|status| status.event_history)
                 .unwrap_or_default();
 
             let mut final_status = TaskStatusFile {
@@ -1209,7 +742,6 @@ impl BackgroundTaskManager {
                 wake: wake_flag,
                 progress: prior_progress,
                 event_history: prior_event_history,
-                execution: prior_execution,
             };
             push_task_event(
                 &mut final_status,
@@ -1249,12 +781,6 @@ impl BackgroundTaskManager {
                 exit_code,
                 error,
                 status: Some(status),
-                execution_state: Some(if exit_code == Some(0) {
-                    "completed".to_string()
-                } else {
-                    "failed".to_string()
-                }),
-                termination_report: None,
             })
         });
 
@@ -1267,8 +793,6 @@ impl BackgroundTaskManager {
             started_at,
             started_at_rfc3339: initial_status.started_at.clone(),
             delivery_flags: delivery_flags_tx,
-            lease_deadline: lease_deadline_tx,
-            absolute_deadline,
             handle: wrapper_handle,
         };
 
@@ -1277,7 +801,6 @@ impl BackgroundTaskManager {
             .await
             .insert(task_id.clone(), running_task);
         let _ = registered_tx.send(());
-        self.launch_deadline_watchdog(task_id.clone(), lease_deadline_rx, absolute_deadline);
 
         BackgroundTaskInfo {
             task_id,
@@ -1527,33 +1050,11 @@ impl BackgroundTaskManager {
         }
 
         status.progress = Some(progress.clone());
-        let progress_at = Utc::now();
-        status.execution.last_progress_at = Some(progress_at.to_rfc3339());
-        if let Some(deadline) = status
-            .execution
-            .deadline_at
-            .as_deref()
-            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-            .map(|value| value.with_timezone(&Utc))
-        {
-            let proposed = progress_at
-                + chrono::Duration::from_std(crate::execution::DEFAULT_BACKGROUND_LEASE)
-                    .unwrap_or_else(|_| chrono::Duration::hours(1));
-            status.execution.lease_expires_at = Some(proposed.min(deadline).to_rfc3339());
-        }
         push_task_event(
             &mut status,
             progress_event_record(event_kind, progress.clone()),
         );
         self.write_status_file(&status_path, &status).await;
-        crate::execution::record_event(
-            "progress_received",
-            Some(task_id),
-            None,
-            Self::process_container_from_status(&status).as_ref(),
-            None,
-            None,
-        );
 
         Bus::global().publish(BusEvent::BackgroundTaskProgress(
             BackgroundTaskProgressEvent {
@@ -1564,12 +1065,6 @@ impl BackgroundTaskManager {
                 progress,
             },
         ));
-
-        if let Some(task) = self.tasks.read().await.get(task_id) {
-            let renewed = (TokioInstant::now() + crate::execution::DEFAULT_BACKGROUND_LEASE)
-                .min(task.absolute_deadline);
-            let _ = task.lease_deadline.send(renewed);
-        }
 
         Ok(Some(status))
     }
@@ -1615,7 +1110,7 @@ impl BackgroundTaskManager {
 
     /// Cancel a running task
     pub async fn cancel(&self, task_id: &str) -> Result<bool> {
-        self.cancel_with_grace(task_id, crate::execution::DEFAULT_GRACEFUL_TIMEOUT)
+        self.cancel_with_grace(task_id, std::time::Duration::from_millis(400))
             .await
     }
 
@@ -1626,78 +1121,12 @@ impl BackgroundTaskManager {
         task_id: &str,
         _graceful_timeout: std::time::Duration,
     ) -> Result<bool> {
-        crate::execution::record_event(
-            "cancellation_requested",
-            Some(task_id),
-            None,
-            None,
-            Some("user_cancelled"),
-            None,
-        );
         let mut tasks = self.tasks.write().await;
-        if let Some(mut task) = tasks.remove(task_id) {
-            drop(tasks);
-            let prior_status = self.read_status_file(&task.status_path).await;
-            let process_container = prior_status
-                .as_ref()
-                .and_then(Self::process_container_from_status);
-            let termination_started_at = Utc::now();
-
-            let termination_report = if let Some(container) = process_container.as_ref() {
-                let report = crate::execution::terminate_process_container(
-                    container,
-                    _graceful_timeout,
-                    crate::execution::DEFAULT_FORCE_VERIFY_TIMEOUT,
-                )
-                .await;
-                // Let the owning future observe process exit and reap the root.
-                if tokio::time::timeout(
-                    crate::execution::DEFAULT_FORCE_VERIFY_TIMEOUT,
-                    &mut task.handle,
-                )
-                .await
-                .is_err()
-                {
-                    task.handle.abort();
-                    let _ = tokio::time::timeout(Duration::from_secs(1), &mut task.handle).await;
-                }
-                Some(report)
-            } else {
-                // Pure in-process background work has no OS process container.
-                task.handle.abort();
-                let _ = tokio::time::timeout(Duration::from_secs(2), &mut task.handle).await;
-                None
-            };
+        if let Some(task) = tasks.remove(task_id) {
+            task.handle.abort();
 
             // Update status file
             let (notify_flag, wake_flag) = *task.delivery_flags.borrow();
-            let cleanup_verified = termination_report
-                .as_ref()
-                .map(|report| report.cleanup_verified)
-                .unwrap_or(true);
-            let final_error = if cleanup_verified {
-                "Cancelled by user".to_string()
-            } else {
-                "Cancellation requested, but process-tree cleanup verification failed".to_string()
-            };
-            let mut execution = prior_status
-                .as_ref()
-                .map(|status| status.execution.clone())
-                .unwrap_or_default();
-            execution.state = Some(if cleanup_verified {
-                "cancelled".to_string()
-            } else {
-                "kill_failed".to_string()
-            });
-            execution.reason = Some("user_cancelled".to_string());
-            execution.termination_started_at = Some(termination_started_at.to_rfc3339());
-            execution.finished_at = Some(Utc::now().to_rfc3339());
-            if let Some(report) = termination_report {
-                execution.graceful_termination_attempted = report.graceful_termination_attempted;
-                execution.force_kill_required = report.force_kill_required;
-                execution.descendants_observed = Some(report.descendants_observed);
-                execution.descendants_remaining = Some(report.descendants_remaining);
-            }
             let mut final_status = TaskStatusFile {
                 task_id: task.task_id,
                 tool_name: task.tool_name,
@@ -1705,7 +1134,7 @@ impl BackgroundTaskManager {
                 session_id: task.session_id,
                 status: BackgroundTaskStatus::Failed,
                 exit_code: None,
-                error: Some(final_error),
+                error: Some("Cancelled by user".to_string()),
                 started_at: task.started_at_rfc3339,
                 completed_at: Some(chrono::Utc::now().to_rfc3339()),
                 duration_secs: Some(task.started_at.elapsed().as_secs_f64()),
@@ -1715,14 +1144,8 @@ impl BackgroundTaskManager {
                 detached: false,
                 notify: notify_flag,
                 wake: wake_flag,
-                progress: prior_status
-                    .as_ref()
-                    .and_then(|status| status.progress.clone()),
-                event_history: prior_status
-                    .as_ref()
-                    .map(|status| status.event_history.clone())
-                    .unwrap_or_default(),
-                execution,
+                progress: None,
+                event_history: Vec::new(),
             };
             let event_status = final_status.status.clone();
             let event_exit_code = final_status.exit_code;
@@ -1733,9 +1156,6 @@ impl BackgroundTaskManager {
             );
             if let Ok(json) = serde_json::to_string_pretty(&final_status) {
                 let _ = fs::write(&task.status_path, json).await;
-            }
-            if !cleanup_verified {
-                self.schedule_kill_reconciliation(task_id.to_string());
             }
 
             Ok(true)
@@ -1756,40 +1176,26 @@ impl BackgroundTaskManager {
             let Some(pid) = status.pid else {
                 return Ok(false);
             };
-            let Some(container) = Self::process_container_from_status(&status) else {
-                return Ok(false);
-            };
-            let termination_started_at = Utc::now();
-            let report = crate::execution::terminate_process_container(
-                &container,
-                _graceful_timeout,
-                crate::execution::DEFAULT_FORCE_VERIFY_TIMEOUT,
-            )
-            .await;
-            let _ = crate::platform::try_reap_child_process(pid);
+
+            #[cfg(unix)]
+            {
+                let _ = crate::platform::signal_detached_process_group(pid, libc::SIGTERM);
+                tokio::time::sleep(_graceful_timeout).await;
+                if crate::platform::is_process_running(pid) {
+                    let _ = crate::platform::signal_detached_process_group(pid, libc::SIGKILL);
+                }
+            }
+            #[cfg(windows)]
+            {
+                let _ = crate::platform::signal_detached_process_group(pid, 0);
+            }
 
             let completed_at = Utc::now();
             status.status = BackgroundTaskStatus::Failed;
             status.exit_code = None;
-            status.error = Some(if report.cleanup_verified {
-                "Cancelled by user".to_string()
-            } else {
-                "Cancellation requested, but process-tree cleanup verification failed".to_string()
-            });
+            status.error = Some("Cancelled by user".to_string());
             status.completed_at = Some(completed_at.to_rfc3339());
             status.duration_secs = Self::status_duration_secs(&status.started_at, completed_at);
-            status.execution.state = Some(if report.cleanup_verified {
-                "cancelled".to_string()
-            } else {
-                "kill_failed".to_string()
-            });
-            status.execution.reason = Some("user_cancelled".to_string());
-            status.execution.termination_started_at = Some(termination_started_at.to_rfc3339());
-            status.execution.finished_at = Some(completed_at.to_rfc3339());
-            status.execution.graceful_termination_attempted = report.graceful_termination_attempted;
-            status.execution.force_kill_required = report.force_kill_required;
-            status.execution.descendants_observed = Some(report.descendants_observed);
-            status.execution.descendants_remaining = Some(report.descendants_remaining);
             let event_status = status.status.clone();
             let event_exit_code = status.exit_code;
             let event_error = status.error.clone();
@@ -1798,9 +1204,6 @@ impl BackgroundTaskManager {
                 terminal_event_record(event_status, event_exit_code, event_error.as_deref()),
             );
             self.write_status_file(&status_path, &status).await;
-            if !report.cleanup_verified {
-                self.schedule_kill_reconciliation(task_id.to_string());
-            }
             Ok(true)
         }
     }
@@ -1824,7 +1227,12 @@ impl BackgroundTaskManager {
         };
         let mut finalized = 0;
 
-        for mut task in tasks {
+        for task in tasks {
+            task.handle.abort();
+            // Wait (bounded) for the aborted future to actually drop, so
+            // kill_on_drop children are killed before the upcoming exec.
+            let _ = tokio::time::timeout(Duration::from_secs(2), task.handle).await;
+
             let (notify_flag, wake_flag) = *task.delivery_flags.borrow();
             let prior_status = self.read_status_file(&task.status_path).await;
             // If the task won the race and finished naturally, keep its real
@@ -1835,54 +1243,7 @@ impl BackgroundTaskManager {
             {
                 continue;
             }
-            let termination_report = if let Some(container) = prior_status
-                .as_ref()
-                .and_then(Self::process_container_from_status)
-            {
-                let report = crate::execution::terminate_process_container(
-                    &container,
-                    crate::execution::DEFAULT_GRACEFUL_TIMEOUT,
-                    crate::execution::DEFAULT_FORCE_VERIFY_TIMEOUT,
-                )
-                .await;
-                if tokio::time::timeout(
-                    crate::execution::DEFAULT_FORCE_VERIFY_TIMEOUT,
-                    &mut task.handle,
-                )
-                .await
-                .is_err()
-                {
-                    task.handle.abort();
-                    let _ = tokio::time::timeout(Duration::from_secs(1), &mut task.handle).await;
-                }
-                Some(report)
-            } else {
-                task.handle.abort();
-                let _ = tokio::time::timeout(Duration::from_secs(2), &mut task.handle).await;
-                None
-            };
             let error = "Interrupted by server reload: the owning server process was replaced before the task finished".to_string();
-            let mut execution = prior_status
-                .as_ref()
-                .map(|status| status.execution.clone())
-                .unwrap_or_default();
-            let cleanup_verified = termination_report
-                .as_ref()
-                .map(|report| report.cleanup_verified)
-                .unwrap_or(true);
-            execution.state = Some(if cleanup_verified {
-                "backend_interrupted".to_string()
-            } else {
-                "kill_failed".to_string()
-            });
-            execution.reason = Some("backend_shutdown".to_string());
-            execution.finished_at = Some(Utc::now().to_rfc3339());
-            if let Some(report) = termination_report {
-                execution.graceful_termination_attempted = report.graceful_termination_attempted;
-                execution.force_kill_required = report.force_kill_required;
-                execution.descendants_observed = Some(report.descendants_observed);
-                execution.descendants_remaining = Some(report.descendants_remaining);
-            }
             let mut final_status = TaskStatusFile {
                 task_id: task.task_id,
                 tool_name: task.tool_name,
@@ -1907,10 +1268,8 @@ impl BackgroundTaskManager {
                     .as_ref()
                     .and_then(|status| status.progress.clone()),
                 event_history: prior_status
-                    .as_ref()
-                    .map(|status| status.event_history.clone())
+                    .map(|status| status.event_history)
                     .unwrap_or_default(),
-                execution,
             };
             push_task_event(
                 &mut final_status,

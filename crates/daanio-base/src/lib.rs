@@ -36,7 +36,6 @@ pub mod embedding_backend;
 #[cfg(not(feature = "embeddings"))]
 pub mod embedding_stub;
 pub mod env;
-pub mod execution;
 pub mod gateway;
 pub mod generated_image;
 pub mod github;

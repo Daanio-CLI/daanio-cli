@@ -6,72 +6,6 @@ use std::path::PathBuf;
 use std::time::Instant;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tokio::time::Instant as TokioInstant;
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ExecutionTaskMetadata {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deadline_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lease_expires_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_progress_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effective_timeout_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub graceful_timeout_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_container: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root_pid: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_group_id: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_start_token: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub termination_started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub finished_at: Option<String>,
-    #[serde(default)]
-    pub graceful_termination_attempted: bool,
-    #[serde(default)]
-    pub force_kill_required: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub descendants_observed: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub descendants_remaining: Option<usize>,
-    #[serde(default)]
-    pub output_truncated: bool,
-}
-
-impl ExecutionTaskMetadata {
-    pub fn from_policy(policy: &crate::execution::EffectiveExecutionPolicy) -> Self {
-        let started = Utc::now();
-        let lease = policy
-            .timeout()
-            .min(crate::execution::DEFAULT_BACKGROUND_LEASE);
-        let lease_expires_at = started
-            + chrono::Duration::from_std(lease).unwrap_or_else(|_| chrono::Duration::hours(1));
-        Self {
-            state: Some("running".to_string()),
-            deadline_at: Some(policy.deadline_at.to_rfc3339()),
-            lease_expires_at: Some(lease_expires_at.to_rfc3339()),
-            last_progress_at: Some(started.to_rfc3339()),
-            effective_timeout_ms: Some(policy.effective_timeout_ms),
-            graceful_timeout_ms: Some(policy.graceful_timeout_ms),
-            process_container: Some(if cfg!(unix) {
-                "process_group".to_string()
-            } else {
-                "job_object".to_string()
-            }),
-            ..Self::default()
-        }
-    }
-}
 
 /// Directory for background task output files
 pub(super) fn task_dir() -> PathBuf {
@@ -146,10 +80,6 @@ pub struct TaskStatusFile {
     pub progress: Option<BackgroundTaskProgress>,
     #[serde(default)]
     pub event_history: Vec<BackgroundTaskEventRecord>,
-    /// Supervision/deadline fields are flattened for API compatibility while
-    /// remaining backward-compatible with status files from older releases.
-    #[serde(default, flatten)]
-    pub execution: ExecutionTaskMetadata,
 }
 
 fn default_true() -> bool {
@@ -301,8 +231,6 @@ pub(super) struct RunningTask {
     pub(super) started_at: Instant,
     pub(super) started_at_rfc3339: String,
     pub(super) delivery_flags: watch::Sender<(bool, bool)>,
-    pub(super) lease_deadline: watch::Sender<TokioInstant>,
-    pub(super) absolute_deadline: TokioInstant,
     pub(super) handle: JoinHandle<Result<TaskResult>>,
 }
 
@@ -311,8 +239,6 @@ pub struct TaskResult {
     pub exit_code: Option<i32>,
     pub error: Option<String>,
     pub status: Option<BackgroundTaskStatus>,
-    pub execution_state: Option<String>,
-    pub termination_report: Option<crate::execution::TerminationReport>,
 }
 
 impl TaskResult {
@@ -321,8 +247,6 @@ impl TaskResult {
             exit_code,
             error: None,
             status: Some(BackgroundTaskStatus::Completed),
-            execution_state: Some("completed".to_string()),
-            termination_report: None,
         }
     }
 
@@ -331,8 +255,6 @@ impl TaskResult {
             exit_code,
             error: Some(error.into()),
             status: Some(BackgroundTaskStatus::Failed),
-            execution_state: Some("failed".to_string()),
-            termination_report: None,
         }
     }
 
@@ -341,26 +263,6 @@ impl TaskResult {
             exit_code,
             error: Some(detail.into()),
             status: Some(BackgroundTaskStatus::Superseded),
-            execution_state: Some("superseded".to_string()),
-            termination_report: None,
-        }
-    }
-
-    pub fn timed_out(
-        exit_code: Option<i32>,
-        detail: impl Into<String>,
-        report: crate::execution::TerminationReport,
-    ) -> Self {
-        Self {
-            exit_code,
-            error: Some(detail.into()),
-            status: Some(BackgroundTaskStatus::Failed),
-            execution_state: Some(if report.cleanup_verified {
-                "timed_out".to_string()
-            } else {
-                "kill_failed".to_string()
-            }),
-            termination_report: Some(report),
         }
     }
 }

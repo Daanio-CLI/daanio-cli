@@ -100,18 +100,10 @@ export -f cargo
             .kill_on_drop(true)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        crate::execution::configure_command(&mut cmd);
 
         let mut child = cmd
             .spawn()
             .map_err(|e| anyhow::anyhow!("Failed to spawn build command: {}", e))?;
-        let container = crate::execution::ProcessContainer::from_child(&child)?;
-        let mut process_guard = crate::execution::ProcessTreeGuard::new(container.clone());
-        let policy = crate::execution::EffectiveExecutionPolicy::normalize(
-            crate::execution::ExecutionClass::LongForeground,
-            None,
-            None,
-        );
 
         let mut file = tokio::fs::File::create(&output_path)
             .await
@@ -128,9 +120,6 @@ export -f cargo
         let mut stderr_lines = stderr.map(|s| BufReader::new(s).lines());
         let mut stdout_done = stdout_lines.is_none();
         let mut stderr_done = stderr_lines.is_none();
-        let deadline = tokio::time::sleep(policy.timeout());
-        tokio::pin!(deadline);
-        let mut termination_report = None;
 
         while !stdout_done || !stderr_done {
             tokio::select! {
@@ -156,24 +145,6 @@ export -f cargo
                         _ => stderr_done = true,
                     }
                 }
-                _ = &mut deadline, if termination_report.is_none() => {
-                    let report = crate::execution::terminate_process_tree(
-                        &mut child,
-                        &container,
-                        policy.graceful_timeout(),
-                        policy.force_verify_timeout(),
-                    ).await;
-                    Self::append_output_line(
-                        &mut file,
-                        format!(
-                            "[supervisor] Build exceeded its {}ms absolute timeout; force kill required: {}; descendants remaining: {}.",
-                            policy.effective_timeout_ms,
-                            report.force_kill_required,
-                            report.descendants_remaining,
-                        ),
-                    ).await;
-                    termination_report = Some(report);
-                }
             }
         }
 
@@ -187,35 +158,6 @@ export -f cargo
             ),
         )
         .await;
-
-        if let Some(report) = termination_report {
-            if report.cleanup_verified {
-                process_guard.disarm();
-            }
-            return Ok(TaskResult::timed_out(
-                exit_code,
-                "Self-development build exceeded its absolute deadline",
-                report,
-            ));
-        }
-
-        if container.is_alive() {
-            let report = crate::execution::terminate_process_tree(
-                &mut child,
-                &container,
-                policy.graceful_timeout(),
-                policy.force_verify_timeout(),
-            )
-            .await;
-            if !report.cleanup_verified {
-                return Ok(TaskResult::timed_out(
-                    exit_code,
-                    "Build root exited but descendant cleanup verification failed",
-                    report,
-                ));
-            }
-        }
-        process_guard.disarm();
 
         if status.success() {
             Ok(TaskResult::completed(exit_code))

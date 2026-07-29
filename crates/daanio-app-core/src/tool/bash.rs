@@ -7,17 +7,24 @@ use crate::stdin_detect::{self, StdinState};
 use crate::util::truncate_str;
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{Value, json};
+#[cfg(unix)]
+use std::fs::OpenOptions;
 use std::path::Path;
+#[cfg(unix)]
+use std::process::Command as StdCommand;
 use std::process::Stdio;
 use std::sync::LazyLock;
 use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
 const MAX_OUTPUT_LEN: usize = 30000;
-const MAX_CAPTURE_BYTES_PER_STREAM: usize = 8 * 1024 * 1024;
+const DEFAULT_TIMEOUT_MS: u64 = 120000;
 const STDIN_POLL_INTERVAL_MS: u64 = 500;
 const STDIN_INITIAL_DELAY_MS: u64 = 300;
 const PROGRESS_MARKER_PREFIX: &str = "DAANIO_PROGRESS ";
@@ -463,6 +470,31 @@ fn configure_tool_scratch(command: &mut TokioCommand) {
     }
 }
 
+#[cfg(unix)]
+struct ProcessGroupKillGuard {
+    pid: Option<u32>,
+}
+
+#[cfg(unix)]
+impl ProcessGroupKillGuard {
+    fn new(pid: Option<u32>) -> Self {
+        Self { pid }
+    }
+
+    fn disarm(&mut self) {
+        self.pid = None;
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProcessGroupKillGuard {
+    fn drop(&mut self) {
+        if let Some(pid) = self.pid {
+            let _ = crate::platform::signal_detached_process_group(pid, libc::SIGKILL);
+        }
+    }
+}
+
 fn build_shell_command(cmd_str: &str) -> TokioCommand {
     #[cfg(windows)]
     {
@@ -479,6 +511,20 @@ fn build_shell_command(cmd_str: &str) -> TokioCommand {
     }
 }
 
+#[cfg(unix)]
+fn build_detached_shell_wrapper(command: &str) -> StdCommand {
+    let mut cmd = StdCommand::new("bash");
+    cmd.arg("-lc")
+        .arg(
+            r#"eval "$DAANIO_RELOAD_DETACH_COMMAND"; status=$?; printf '\n--- Command finished with exit code: %s ---\n' "$status"; exit "$status""#,
+        )
+        .env("DAANIO_RELOAD_DETACH_COMMAND", command);
+    if let Some(dir) = tool_scratch_dir() {
+        cmd.env("TMPDIR", &dir).env("DAANIO_SCRATCH_DIR", dir);
+    }
+    cmd
+}
+
 fn format_command_output(mut output: String, exit_code: Option<i32>) -> String {
     if output.len() > MAX_OUTPUT_LEN {
         output = truncate_str(&output, MAX_OUTPUT_LEN).to_string();
@@ -493,41 +539,6 @@ fn format_command_output(mut output: String, exit_code: Option<i32>) -> String {
         "Command completed successfully (no output)".to_string()
     } else {
         output
-    }
-}
-
-async fn drain_bounded<R>(mut reader: R, limit: usize) -> (String, bool)
-where
-    R: tokio::io::AsyncRead + Unpin,
-{
-    let mut retained = Vec::with_capacity(limit.min(64 * 1024));
-    let mut chunk = [0u8; 16 * 1024];
-    let mut truncated = false;
-    loop {
-        match reader.read(&mut chunk).await {
-            Ok(0) | Err(_) => break,
-            Ok(read) => {
-                let remaining = limit.saturating_sub(retained.len());
-                let keep = remaining.min(read);
-                retained.extend_from_slice(&chunk[..keep]);
-                truncated |= keep < read;
-            }
-        }
-    }
-    (String::from_utf8_lossy(&retained).into_owned(), truncated)
-}
-
-async fn finish_bounded_drain(
-    mut task: tokio::task::JoinHandle<(String, bool)>,
-    timeout: Duration,
-) -> (String, bool) {
-    match tokio::time::timeout(timeout, &mut task).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(_)) => (String::new(), true),
-        Err(_) => {
-            task.abort();
-            (String::new(), true)
-        }
     }
 }
 
@@ -594,10 +605,6 @@ struct BashInput {
     #[serde(default)]
     timeout: Option<u64>,
     #[serde(default)]
-    timeout_ms: Option<u64>,
-    #[serde(default)]
-    graceful_timeout_ms: Option<u64>,
-    #[serde(default)]
     run_in_background: Option<bool>,
     #[serde(default = "default_true")]
     notify: bool,
@@ -640,21 +647,7 @@ impl Tool for BashTool {
                 },
                 "timeout": {
                     "type": "integer",
-                    "minimum": 1,
-                    "maximum": 86400000,
-                    "description": "Absolute timeout in MILLISECONDS (not seconds). The complete process tree is terminated when exceeded. Omitted/zero values are normalized to a safe default: 10 minutes foreground, 2 minutes for browser actions, or a 60-minute background lease; ordinary commands can never request no deadline."
-                },
-                "timeout_ms": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 86400000,
-                    "description": "Alias for timeout. Absolute execution deadline in milliseconds."
-                },
-                "graceful_timeout_ms": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 30000,
-                    "description": "Bounded grace period after termination is requested and before the process container is force-killed. Defaults to 2000ms."
+                    "description": "Timeout in MILLISECONDS (not seconds). Kills the command when exceeded and reports exit 124. e.g. 1000 = 1s, 600000 = 10min. Omit to run with no timeout; do NOT pass small values like 1000 for long jobs such as builds or test suites."
                 },
                 "run_in_background": {
                     "type": "boolean",
@@ -709,22 +702,19 @@ impl BashTool {
         params: &BashInput,
         ctx: &ToolContext,
     ) -> Result<ToolOutput> {
-        let execution_class = if crate::browser::is_browser_command(&params.command) {
-            crate::execution::ExecutionClass::BrowserAction
-        } else {
-            crate::execution::ExecutionClass::Foreground
-        };
-        let policy = crate::execution::EffectiveExecutionPolicy::normalize(
-            execution_class,
-            params.timeout.or(params.timeout_ms),
-            params.graceful_timeout_ms,
-        );
-        let timeout_ms = policy.effective_timeout_ms;
+        #[cfg(unix)]
+        if self.supports_reload_persistence(ctx) {
+            return self
+                .execute_reload_persistable_foreground(params, ctx)
+                .await;
+        }
+
+        let timeout_ms = params.timeout.unwrap_or(DEFAULT_TIMEOUT_MS).min(600000);
+        let timeout_duration = Duration::from_millis(timeout_ms);
 
         let has_stdin_channel = ctx.stdin_request_tx.is_some();
 
         let mut command = build_shell_command(&params.command);
-        crate::execution::configure_command(&mut command);
         command
             .kill_on_drop(true)
             .stdout(Stdio::piped())
@@ -738,227 +728,338 @@ impl BashTool {
             command.current_dir(dir);
         }
         let mut child = command.spawn()?;
-        let container = crate::execution::ProcessContainer::from_child(&child)?;
-        let mut process_group_guard = crate::execution::ProcessTreeGuard::new(container.clone());
 
         let child_pid = child.id().unwrap_or(0);
         let stdin_handle = child.stdin.take();
         let stdout_handle = child.stdout.take();
         let stderr_handle = child.stderr.take();
 
-        // Owned copies used by the supervised I/O and stdin tasks.
+        // Owned copies so the work can outlive this call if it is promoted to a
+        // background task on timeout.
         let title = params
             .intent
             .clone()
             .unwrap_or_else(|| params.command.clone());
         let stdin_tx = ctx.stdin_request_tx.clone();
         let tool_call_id = ctx.tool_call_id.clone();
-        let stdout_task = tokio::spawn(async move {
-            match stdout_handle {
-                Some(out) => drain_bounded(out, MAX_CAPTURE_BYTES_PER_STREAM).await,
-                None => (String::new(), false),
-            }
-        });
-        let stderr_task = tokio::spawn(async move {
-            match stderr_handle {
-                Some(err) => drain_bounded(err, MAX_CAPTURE_BYTES_PER_STREAM).await,
-                None => (String::new(), false),
-            }
-        });
+        let title_for_work = title.clone();
 
-        let stdin_task = if has_stdin_channel {
-            Some(tokio::spawn(async move {
-                if let (Some(mut stdin_pipe), Some(stdin_tx)) = (stdin_handle, stdin_tx) {
-                    tokio::time::sleep(Duration::from_millis(STDIN_INITIAL_DELAY_MS)).await;
-                    let mut request_counter = 0u32;
-                    loop {
-                        #[cfg(target_os = "linux")]
-                        let state = stdin_detect::linux::check_process_tree(child_pid);
-                        #[cfg(not(target_os = "linux"))]
-                        let state = stdin_detect::is_waiting_for_stdin(child_pid);
-                        if state != StdinState::Reading {
-                            tokio::time::sleep(Duration::from_millis(STDIN_POLL_INTERVAL_MS)).await;
-                            continue;
-                        }
-                        request_counter += 1;
-                        let request_id = format!("stdin-{}-{}", tool_call_id, request_counter);
-                        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-                        if stdin_tx
-                            .send(StdinInputRequest {
-                                request_id,
-                                prompt: String::new(),
-                                is_password: false,
-                                response_tx,
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                        let Ok(input) = response_rx.await else {
-                            break;
-                        };
-                        let line = if input.ends_with('\n') {
-                            input
-                        } else {
-                            format!("{}\n", input)
-                        };
-                        if stdin_pipe.write_all(line.as_bytes()).await.is_err()
-                            || stdin_pipe.flush().await.is_err()
-                        {
-                            break;
-                        }
+        // Run the command (read stdout/stderr, service stdin, wait for exit) in a
+        // dedicated task so that, if it exceeds the foreground timeout, we can hand
+        // the still-running task off to the background manager instead of killing it.
+        let mut work_handle: tokio::task::JoinHandle<Result<ToolOutput>> =
+            tokio::spawn(async move {
+                let stdout_task = tokio::spawn(async move {
+                    let mut buf = String::new();
+                    if let Some(mut out) = stdout_handle {
+                        let _ = out.read_to_string(&mut buf).await;
                     }
+                    buf
+                });
+
+                let stderr_task = tokio::spawn(async move {
+                    let mut buf = String::new();
+                    if let Some(mut err) = stderr_handle {
+                        let _ = err.read_to_string(&mut buf).await;
+                    }
+                    buf
+                });
+
+                let stdin_task = if has_stdin_channel {
+                    Some(tokio::spawn(async move {
+                        if let (Some(mut stdin_pipe), Some(stdin_tx)) = (stdin_handle, stdin_tx) {
+                            tokio::time::sleep(Duration::from_millis(STDIN_INITIAL_DELAY_MS)).await;
+
+                            let mut request_counter = 0u32;
+                            loop {
+                                #[cfg(target_os = "linux")]
+                                let state = stdin_detect::linux::check_process_tree(child_pid);
+                                #[cfg(not(target_os = "linux"))]
+                                let state = stdin_detect::is_waiting_for_stdin(child_pid);
+
+                                if state == StdinState::Reading {
+                                    request_counter += 1;
+                                    let request_id =
+                                        format!("stdin-{}-{}", tool_call_id, request_counter);
+                                    let (response_tx, response_rx) =
+                                        tokio::sync::oneshot::channel();
+
+                                    let request = StdinInputRequest {
+                                        request_id,
+                                        prompt: String::new(),
+                                        is_password: false,
+                                        response_tx,
+                                    };
+
+                                    if stdin_tx.send(request).is_err() {
+                                        break;
+                                    }
+
+                                    match response_rx.await {
+                                        Ok(input) => {
+                                            let line = if input.ends_with('\n') {
+                                                input
+                                            } else {
+                                                format!("{}\n", input)
+                                            };
+                                            if stdin_pipe.write_all(line.as_bytes()).await.is_err()
+                                            {
+                                                break;
+                                            }
+                                            if stdin_pipe.flush().await.is_err() {
+                                                break;
+                                            }
+                                        }
+                                        Err(_) => break,
+                                    }
+
+                                    tokio::time::sleep(Duration::from_millis(100)).await;
+                                } else {
+                                    tokio::time::sleep(Duration::from_millis(
+                                        STDIN_POLL_INTERVAL_MS,
+                                    ))
+                                    .await;
+                                }
+                            }
+                        }
+                    }))
+                } else {
+                    drop(stdin_handle);
+                    None
+                };
+
+                let status = child.wait().await?;
+
+                if let Some(task) = stdin_task {
+                    task.abort();
                 }
-            }))
-        } else {
-            drop(stdin_handle);
-            None
-        };
 
-        let deadline = tokio::time::sleep(policy.timeout());
-        tokio::pin!(deadline);
-        let graceful_shutdown = ctx.graceful_shutdown_signal.clone();
-        let cancellation = async move {
-            match graceful_shutdown {
-                Some(signal) => signal.notified().await,
-                None => std::future::pending::<()>().await,
-            }
-        };
-        tokio::pin!(cancellation);
-        let (status, termination, termination_reason) = tokio::select! {
-            result = child.wait() => (Some(result?), None, None),
-            _ = &mut deadline => {
-                let report = crate::execution::terminate_process_tree(
-                    &mut child,
-                    &container,
-                    policy.graceful_timeout(),
-                    policy.force_verify_timeout(),
-                ).await;
-                (None, Some(report), Some("absolute_deadline_exceeded"))
-            }
-            _ = &mut cancellation => {
-                let report = crate::execution::terminate_process_tree(
-                    &mut child,
-                    &container,
-                    policy.graceful_timeout(),
-                    policy.force_verify_timeout(),
-                ).await;
-                (None, Some(report), Some("user_cancelled"))
-            }
-        };
+                let stdout = stdout_task.await.unwrap_or_default();
+                let stderr = stderr_task.await.unwrap_or_default();
 
-        if let Some(task) = stdin_task {
-            task.abort();
+                let mut output = String::new();
+                if !stdout.is_empty() {
+                    output.push_str(&stdout);
+                }
+                if !stderr.is_empty() {
+                    if !output.is_empty() {
+                        output.push('\n');
+                    }
+                    output.push_str(&stderr);
+                }
+                let output = format_command_output(output, status.code());
+                Ok(ToolOutput::new(output).with_title(title_for_work))
+            });
+
+        match tokio::time::timeout(timeout_duration, &mut work_handle).await {
+            Ok(join_result) => match join_result {
+                Ok(Ok(output)) => Ok(output),
+                Ok(Err(e)) => Err(anyhow::anyhow!("Command failed: {}", e)),
+                Err(join_err) => Err(anyhow::anyhow!("Command task panicked: {}", join_err)),
+            },
+            Err(_) => {
+                // Timed out, but the command is still running. Instead of killing
+                // it, promote it to a background task so it keeps running, renders
+                // as a background-task card, and the agent is told where to find it.
+                let display_name =
+                    summarize_background_command(params.intent.as_deref(), &params.command);
+                let info = crate::background::global()
+                    .adopt_with_options(
+                        "bash",
+                        Some(display_name.clone()),
+                        &ctx.session_id,
+                        params.notify,
+                        params.wake,
+                        work_handle,
+                    )
+                    .await;
+
+                let output = format!(
+                    "Command exceeded the foreground timeout after {:.1}s and is continuing in background (not killed).\n\n\
+                     Task ID: {}\n\
+                     Name: {}\n\
+                     Output file: {}\n\
+                     Status file: {}\n\n\
+                     The command is still running; do not rerun it unless you intentionally want a second copy.\n\
+                     Use `bg` with action=\"wait\" and task_id=\"{}\" to wait for completion or the next progress checkpoint.\n\
+                     Use `bg` with action=\"output\" and task_id=\"{}\" to inspect output.\n\
+                     If you expected it to finish quickly and it did not, the `timeout` parameter is in MILLISECONDS; pass a larger value or omit it.",
+                    timeout_ms as f64 / 1000.0,
+                    info.task_id,
+                    display_name,
+                    info.output_file.display(),
+                    info.status_file.display(),
+                    info.task_id,
+                    info.task_id,
+                );
+
+                Ok(ToolOutput::new(output)
+                    .with_title(title)
+                    .with_metadata(json!({
+                        "background": true,
+                        "task_id": info.task_id,
+                        "display_name": display_name,
+                        "output_file": info.output_file.to_string_lossy(),
+                        "status_file": info.status_file.to_string_lossy(),
+                        "timeout_promoted": true,
+                        "foreground_timeout_ms": timeout_ms,
+                    })))
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn supports_reload_persistence(&self, ctx: &ToolContext) -> bool {
+        matches!(
+            ctx.execution_mode,
+            crate::tool::ToolExecutionMode::AgentTurn
+        ) && ctx.stdin_request_tx.is_none()
+            && ctx.graceful_shutdown_signal.is_some()
+    }
+
+    #[cfg(unix)]
+    async fn execute_reload_persistable_foreground(
+        &self,
+        params: &BashInput,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput> {
+        let timeout_ms = params.timeout.unwrap_or(DEFAULT_TIMEOUT_MS).min(600000);
+        let timeout_duration = Duration::from_millis(timeout_ms);
+        let started_at = Utc::now().to_rfc3339();
+        let started = Instant::now();
+        let manager = crate::background::global();
+        let info = manager.reserve_task_info();
+        let display_name = summarize_background_command(params.intent.as_deref(), &params.command);
+
+        let mut cmd = build_detached_shell_wrapper(&params.command);
+        let stdout = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&info.output_file)?;
+        let stderr = stdout.try_clone()?;
+        cmd.stdin(Stdio::null()).stdout(stdout).stderr(stderr);
+        if let Some(ref dir) = ctx.working_dir {
+            cmd.current_dir(dir);
         }
 
-        // A shell can exit after daemonizing a descendant. Ordinary commands
-        // are not managed services, so clean the recorded process group before
-        // reporting completion.
-        let completion_cleanup = if status.is_some() && container.is_alive() {
-            Some(
-                crate::execution::terminate_process_tree(
-                    &mut child,
-                    &container,
-                    policy.graceful_timeout(),
-                    policy.force_verify_timeout(),
-                )
-                .await,
-            )
-        } else {
-            None
-        };
+        let mut child = crate::platform::spawn_detached(&mut cmd)?;
+        let pid = child.id();
+        let shutdown_signal = ctx.graceful_shutdown_signal.clone();
 
-        let cleanup_verified = termination
-            .as_ref()
-            .or(completion_cleanup.as_ref())
-            .is_none_or(|report| report.cleanup_verified);
-        if cleanup_verified {
-            process_group_guard.disarm();
-        }
-
-        let (stdout, stdout_truncated) =
-            finish_bounded_drain(stdout_task, policy.force_verify_timeout()).await;
-        let (stderr, stderr_truncated) =
-            finish_bounded_drain(stderr_task, policy.force_verify_timeout()).await;
-        let output_truncated = stdout_truncated || stderr_truncated;
-        let mut output = stdout;
-        if !stderr.is_empty() {
-            if !output.is_empty() {
-                output.push('\n');
+        loop {
+            if let Some(status) = child.try_wait()? {
+                let output = tokio::fs::read_to_string(&info.output_file)
+                    .await
+                    .unwrap_or_default();
+                let _ = tokio::fs::remove_file(&info.output_file).await;
+                let _ = tokio::fs::remove_file(&info.status_file).await;
+                return Ok(
+                    ToolOutput::new(format_command_output(output, status.code())).with_title(
+                        params
+                            .intent
+                            .clone()
+                            .unwrap_or_else(|| params.command.clone()),
+                    ),
+                );
             }
-            output.push_str(&stderr);
-        }
-        if policy.timeout_was_normalized {
-            if !output.is_empty() {
-                output.push_str("\n\n");
-            }
-            output.push_str(&format!(
-                "[supervisor] Effective timeout: {}ms; deadline: {}",
-                policy.effective_timeout_ms,
-                policy.deadline_at.to_rfc3339(),
-            ));
-        }
 
-        if let Some(report) = termination {
-            let was_cancelled = termination_reason == Some("user_cancelled");
-            let action = if was_cancelled {
-                "Command cancelled".to_string()
-            } else {
-                timeout_message(timeout_ms)
-            };
-            let message = if report.cleanup_verified {
-                format!(
-                    "{}; graceful termination attempted, force kill required: {}, descendants remaining: 0",
-                    action, report.force_kill_required,
-                )
-            } else {
-                format!(
-                    "{}; process-tree cleanup verification FAILED ({} descendants remain)",
-                    action, report.descendants_remaining,
-                )
-            };
-            if !output.is_empty() {
-                output.push_str("\n\n");
-            }
-            output.push_str(&message);
-            let terminal_code = if was_cancelled { 130 } else { 124 };
-            return Ok(
-                ToolOutput::new(format_command_output(output, Some(terminal_code)))
-                .with_title(title)
-                .with_metadata(json!({
-                    "state": if !report.cleanup_verified { "kill_failed" } else if was_cancelled { "cancelled" } else { "timed_out" },
-                    "reason": termination_reason,
-                    "deadline_at": policy.deadline_at,
-                    "effective_timeout_ms": policy.effective_timeout_ms,
-                    "process_container": container.kind,
-                    "graceful_termination_attempted": report.graceful_termination_attempted,
-                    "force_kill_required": report.force_kill_required,
-                    "descendants_observed": report.descendants_observed,
-                    "descendants_remaining": report.descendants_remaining,
-                    "output_truncated": output_truncated,
-                })));
-        }
+            if started.elapsed() >= timeout_duration {
+                let elapsed = started.elapsed();
+                manager
+                    .register_detached_task(
+                        &info,
+                        "bash",
+                        Some(display_name.clone()),
+                        &ctx.session_id,
+                        pid,
+                        &started_at,
+                        params.notify,
+                        params.wake,
+                    )
+                    .await;
 
-        let status = status.expect("status is present when termination report is absent");
-        let cleanup_verified = completion_cleanup
-            .as_ref()
-            .map(|report| report.cleanup_verified)
-            .unwrap_or(true);
-        if !cleanup_verified {
-            anyhow::bail!("Command exited but descendant cleanup verification failed");
+                let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+                let output = format!(
+                    "Command exceeded the foreground timeout after {:.1}s and is continuing in background.\n\n\
+                     Task ID: {}\n\
+                     Name: {}\n\
+                     Foreground time used: {:.1}s\n\
+                     Output file: {}\n\
+                     Status file: {}\n\n\
+                     The command is still running; do not rerun it unless you intentionally want a second copy.\n\
+                     Use `bg` with action=\"wait\" and task_id=\"{}\" to wait for completion or the next progress checkpoint.\n\
+                     Use `bg` with action=\"output\" and task_id=\"{}\" to inspect output.",
+                    timeout_ms as f64 / 1000.0,
+                    info.task_id,
+                    display_name,
+                    elapsed.as_secs_f64(),
+                    info.output_file.display(),
+                    info.status_file.display(),
+                    info.task_id,
+                    info.task_id,
+                );
+                return Ok(ToolOutput::new(output)
+                    .with_title(
+                        params
+                            .intent
+                            .clone()
+                            .unwrap_or_else(|| params.command.clone()),
+                    )
+                    .with_metadata(json!({
+                        "background": true,
+                        "task_id": info.task_id,
+                        "output_file": info.output_file.to_string_lossy(),
+                        "status_file": info.status_file.to_string_lossy(),
+                        "timeout_promoted": true,
+                        "foreground_timeout_ms": timeout_ms,
+                        "foreground_elapsed_ms": elapsed_ms,
+                        "pid": pid,
+                    })));
+            }
+
+            if shutdown_signal
+                .as_ref()
+                .map(|signal| signal.is_set())
+                .unwrap_or(false)
+            {
+                manager
+                    .register_detached_task(
+                        &info,
+                        "bash",
+                        Some(display_name.clone()),
+                        &ctx.session_id,
+                        pid,
+                        &started_at,
+                        params.notify,
+                        params.wake,
+                    )
+                    .await;
+                let output = format!(
+                    "Command continued in background due to reload.\n\nTask ID: {}\nOutput file: {}\nStatus file: {}\n\nUse `bg` with action=\"wait\" and task_id=\"{}\" after reload to wait for completion or the next progress checkpoint.",
+                    info.task_id,
+                    info.output_file.display(),
+                    info.status_file.display(),
+                    info.task_id,
+                );
+                return Ok(ToolOutput::new(output)
+                    .with_title(
+                        params
+                            .intent
+                            .clone()
+                            .unwrap_or_else(|| params.command.clone()),
+                    )
+                    .with_metadata(json!({
+                        "background": true,
+                        "task_id": info.task_id,
+                        "output_file": info.output_file.to_string_lossy(),
+                        "status_file": info.status_file.to_string_lossy(),
+                        "reload_persisted": true,
+                        "pid": pid,
+                    })));
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        Ok(
-            ToolOutput::new(format_command_output(output, status.code()))
-                .with_title(title)
-                .with_metadata(json!({
-                    "state": if status.success() { "completed" } else { "failed" },
-                    "deadline_at": policy.deadline_at,
-                    "effective_timeout_ms": policy.effective_timeout_ms,
-                    "process_container": container.kind,
-                    "output_truncated": output_truncated,
-                    "completion_cleanup_required": completion_cleanup.is_some(),
-                })),
-        )
     }
 
     /// Execute a command in the background
@@ -967,35 +1068,31 @@ impl BashTool {
         let description = params.intent.clone();
         let display_name = summarize_background_command(description.as_deref(), &command);
         let working_dir = ctx.working_dir.clone();
-        let policy = crate::execution::EffectiveExecutionPolicy::normalize(
-            crate::execution::ExecutionClass::Background,
-            params.timeout.or(params.timeout_ms),
-            params.graceful_timeout_ms,
-        );
-        let timeout_ms = policy.effective_timeout_ms;
-        let timeout_duration = policy.timeout();
-        let graceful_timeout = policy.graceful_timeout();
-        let force_verify_timeout = policy.force_verify_timeout();
-        let deadline_at = policy.deadline_at.clone();
-        let lease_expires_at = chrono::Utc::now()
-            + chrono::Duration::from_std(crate::execution::DEFAULT_BACKGROUND_LEASE)
-                .unwrap_or_else(|_| chrono::Duration::hours(1));
+        let timeout_ms = params.timeout.map(|timeout| timeout.min(600000));
+        let timeout_duration = timeout_ms.map(Duration::from_millis);
 
         let wake = params.wake;
         let notify = params.notify || wake;
         let info = crate::background::global()
-            .spawn_with_notify_and_policy(
+            .spawn_with_notify(
                 "bash",
                 Some(display_name.clone()),
                 &ctx.session_id,
                 notify,
                 wake,
-                policy.clone(),
-                move |output_path| async move {
-						let mut cmd = build_shell_command(&command);
-						crate::execution::configure_command(&mut cmd);
-						cmd.kill_on_drop(true)
-							.stdout(Stdio::piped())
+				move |output_path| async move {
+					let mut cmd = build_shell_command(&command);
+					#[cfg(unix)]
+					unsafe {
+						cmd.pre_exec(|| {
+							if libc::setpgid(0, 0) == -1 {
+								return Err(std::io::Error::last_os_error());
+							}
+							Ok(())
+						});
+					}
+					cmd.kill_on_drop(true)
+						.stdout(Stdio::piped())
 						.stderr(Stdio::piped());
                     if let Some(ref dir) = working_dir {
                         cmd.current_dir(dir);
@@ -1003,14 +1100,8 @@ impl BashTool {
                     let mut child = cmd
                         .spawn()
                         .map_err(|e| anyhow::anyhow!("Failed to spawn command: {}", e))?;
-                    let container = crate::execution::ProcessContainer::from_child(&child)?;
-                    if let Some(task_id) = task_id_from_output_path(&output_path) {
-                        crate::background::global()
-                            .register_process_container(task_id, &container)
-                            .await?;
-                    }
-                    let mut process_group_guard =
-                        crate::execution::ProcessTreeGuard::new(container.clone());
+                    #[cfg(unix)]
+                    let mut process_group_guard = ProcessGroupKillGuard::new(child.id());
 
                     // Stream output to file
                     let mut file = tokio::fs::File::create(&output_path)
@@ -1026,14 +1117,31 @@ impl BashTool {
                     let mut stderr_lines = stderr.map(|s| BufReader::new(s).lines());
                     let mut stdout_done = stdout_lines.is_none();
                     let mut stderr_done = stderr_lines.is_none();
-                    let timeout_sleep = tokio::time::sleep(timeout_duration);
+                    let timeout_sleep = timeout_duration.map(tokio::time::sleep);
                     tokio::pin!(timeout_sleep);
                     let mut timed_out = false;
 
 	                    while !stdout_done || !stderr_done {
 	                        tokio::select! {
-	                            _ = &mut timeout_sleep => {
+	                            _ = async {
+	                                match timeout_sleep.as_mut().as_pin_mut() {
+	                                    Some(sleep) => sleep.await,
+	                                    None => std::future::pending().await,
+	                                }
+	                            }, if timeout_duration.is_some() => {
 	                                timed_out = true;
+	                                #[cfg(unix)]
+	                                {
+	                                    if let Some(pid) = child.id() {
+	                                        let _ = crate::platform::signal_detached_process_group(pid, libc::SIGKILL);
+	                                    } else {
+	                                        let _ = child.start_kill();
+	                                    }
+	                                }
+	                                #[cfg(not(unix))]
+	                                {
+	                                    let _ = child.start_kill();
+	                                }
 	                                break;
 	                            }
                             line = async {
@@ -1066,53 +1174,17 @@ impl BashTool {
                     }
 
                     if timed_out {
-                        let report = crate::execution::terminate_process_tree(
-                            &mut child,
-                            &container,
-                            graceful_timeout,
-                            force_verify_timeout,
-                        )
-                        .await;
-                        if report.cleanup_verified {
-                            process_group_guard.disarm();
-                        }
-                        let msg = if report.cleanup_verified {
-                            format!(
-                                "{}; graceful termination attempted, force kill required: {}, descendants remaining: 0",
-                                timeout_message(timeout_ms),
-                                report.force_kill_required,
-                            )
-                        } else {
-                            format!(
-                                "{}; process-tree cleanup verification FAILED ({} descendants remain)",
-                                timeout_message(timeout_ms),
-                                report.descendants_remaining,
-                            )
-                        };
+                        let _ = child.wait().await;
+                        #[cfg(unix)]
+                        process_group_guard.disarm();
+                        let msg = timeout_message(timeout_ms.unwrap_or_default());
                         let timeout_line = format!("\n--- {} ---\n", msg);
                         file.write_all(timeout_line.as_bytes()).await.ok();
-                        return Ok(TaskResult::timed_out(Some(124), msg, report));
+                        return Ok(TaskResult::failed(Some(124), msg));
                     }
 
                     let status = child.wait().await?;
-                    if container.is_alive() {
-                        let report = crate::execution::terminate_process_tree(
-                            &mut child,
-                            &container,
-                            graceful_timeout,
-                            force_verify_timeout,
-                        )
-                        .await;
-                        if !report.cleanup_verified {
-                            return Ok(TaskResult::failed(
-                                status.code(),
-                                format!(
-                                    "Root process exited, but descendant cleanup verification failed ({} remain)",
-                                    report.descendants_remaining
-                                ),
-                            ));
-                        }
-                    }
+                    #[cfg(unix)]
                     process_group_guard.disarm();
                     let exit_code = status.code();
 
@@ -1148,9 +1220,6 @@ impl BashTool {
              Name: {}\n\
              Output file: {}\n\
              Status file: {}\n\n\
-             Effective deadline: {}\n\
-             Lease expires: {}\n\
-             Effective timeout: {}ms\n\
              {}\n\
              To wait for completion/checkpoints: use the `bg` tool with action=\"wait\" and task_id=\"{}\"\n\
              To check progress immediately: use the `bg` tool with action=\"status\" and task_id=\"{}\"\n\
@@ -1159,9 +1228,6 @@ impl BashTool {
             display_name,
             info.output_file.display(),
             info.status_file.display(),
-            deadline_at.to_rfc3339(),
-            lease_expires_at.to_rfc3339(),
-            timeout_ms,
             notify_msg,
             info.task_id,
             info.task_id,
@@ -1175,10 +1241,6 @@ impl BashTool {
                 "display_name": display_name,
                 "output_file": info.output_file.to_string_lossy(),
                 "status_file": info.status_file.to_string_lossy(),
-                "deadline_at": deadline_at,
-                "lease_expires_at": lease_expires_at,
-                "effective_timeout_ms": timeout_ms,
-                "process_container": if cfg!(unix) { "process_group" } else { "job_object" },
             })))
     }
 }

@@ -122,7 +122,6 @@ async fn spawn_tester(opts: serde_json::Value) -> Result<String> {
         debug_resp.to_string_lossy().to_string(),
     );
     cmd.arg("--debug-socket");
-    crate::execution::configure_command(&mut cmd);
 
     // The TUI refuses to start unless stdin/stdout are a TTY, so a headless
     // tester must own a real PTY. Allocate one, hand the slave end to the
@@ -175,32 +174,11 @@ async fn spawn_tester(opts: serde_json::Value) -> Result<String> {
         cmd.stderr(Stdio::from(stderr_file));
     }
 
-    let mut child = cmd.spawn()?;
+    let child = cmd.spawn()?;
     let pid = child.id().unwrap_or(0);
-    let container = crate::execution::ProcessContainer::from_child(&child)?;
-    let mut process_guard = crate::execution::ProcessTreeGuard::new(container);
-    let task_info = crate::background::global().reserve_task_info();
-    let started_at = chrono::Utc::now().to_rfc3339();
-    crate::background::global()
-        .register_detached_task(
-            &task_info,
-            "debug-tester",
-            Some(format!("debug tester {}", id)),
-            "debug",
-            pid,
-            &started_at,
-            false,
-            false,
-        )
-        .await;
-    process_guard.disarm();
-    tokio::spawn(async move {
-        let _ = child.wait().await;
-    });
 
     let info = serde_json::json!({
         "id": id,
-        "task_id": task_info.task_id,
         "pid": pid,
         "binary": binary_path.to_string_lossy(),
         "cwd": cwd,
@@ -208,7 +186,7 @@ async fn spawn_tester(opts: serde_json::Value) -> Result<String> {
         "debug_response_path": debug_resp.to_string_lossy(),
         "stdout_path": stdout_path.to_string_lossy(),
         "stderr_path": stderr_path.to_string_lossy(),
-        "started_at": started_at,
+        "started_at": chrono::Utc::now().to_rfc3339(),
     });
 
     let mut testers = load_testers()?;
@@ -320,23 +298,11 @@ async fn execute_tester_subcommand(
             None => "mermaid:ui-bench".to_string(),
         },
         "stop" => {
-            let cleanup_verified =
-                if let Some(task_id) = tester.get("task_id").and_then(|v| v.as_str()) {
-                    let accepted = crate::background::global().cancel(task_id).await?;
-                    accepted
-                        && crate::background::global()
-                            .status(task_id)
-                            .await
-                            .is_some_and(|status| {
-                                status.execution.state.as_deref() != Some("kill_failed")
-                            })
-                } else {
-                    false
-                };
-            if !cleanup_verified {
-                anyhow::bail!(
-                    "Tester cleanup could not be verified; its registry entry was preserved"
-                );
+            if let Some(pid) = tester.get("pid").and_then(|v| v.as_u64()) {
+                let _ = std::process::Command::new("kill")
+                    .arg("-TERM")
+                    .arg(pid.to_string())
+                    .output();
             }
             let mut testers = load_testers()?;
             testers.retain(|t| t.get("id").and_then(|v| v.as_str()) != Some(tester_id));

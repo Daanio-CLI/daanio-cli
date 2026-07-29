@@ -199,48 +199,17 @@ pub(super) fn handle_input_shell(
             cmd.current_dir(dir);
         }
 
-        let policy = crate::execution::EffectiveExecutionPolicy::normalize(
-            crate::execution::ExecutionClass::Foreground,
-            None,
-            None,
-        );
-        let result = match crate::execution::ExecutionSupervisor::run_to_output(
-            cmd,
-            policy,
-            INPUT_SHELL_MAX_OUTPUT_LEN,
-        )
-        .await
-        {
+        let result = match cmd.output().await {
             Ok(output) => {
                 let (combined_output, truncated) =
                     combine_input_shell_output(&output.stdout, &output.stderr);
-                let (combined_output, exit_code) = if let Some(report) = output.termination.as_ref()
-                {
-                    (
-                        format!(
-                            "{}{}[supervisor] Command exceeded its {}ms absolute deadline; graceful termination attempted: {}; force kill required: {}; descendants remaining: {}.",
-                            combined_output,
-                            if combined_output.is_empty() { "" } else { "\n" },
-                            output.policy.effective_timeout_ms,
-                            report.graceful_termination_attempted,
-                            report.force_kill_required,
-                            report.descendants_remaining,
-                        ),
-                        None,
-                    )
-                } else {
-                    (
-                        combined_output,
-                        output.status.as_ref().and_then(|status| status.code()),
-                    )
-                };
                 crate::message::InputShellResult {
                     command,
                     cwd,
                     output: combined_output,
-                    exit_code,
+                    exit_code: output.status.code(),
                     duration_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-                    truncated: truncated || output.output_truncated,
+                    truncated,
                     failed_to_start: false,
                 }
             }

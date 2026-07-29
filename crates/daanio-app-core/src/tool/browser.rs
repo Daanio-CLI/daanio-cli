@@ -774,33 +774,15 @@ async fn firefox_run_bridge_command(
         command.env("BROWSER_SESSION", session_name);
     }
 
-    let policy = crate::execution::EffectiveExecutionPolicy::normalize(
-        crate::execution::ExecutionClass::BrowserAction,
-        None,
-        None,
-    );
-    let output =
-        crate::execution::ExecutionSupervisor::run_to_output(command, policy, 8 * 1024 * 1024)
-            .await
-            .with_context(|| format!("Failed to run browser bridge action '{}'.", action))?;
-    if let Some(report) = output.termination.as_ref() {
-        anyhow::bail!(
-            "Browser action '{}' exceeded its {}ms deadline. Graceful termination attempted: {}; force kill required: {}; descendants remaining: {}.",
-            action,
-            output.policy.effective_timeout_ms,
-            report.graceful_termination_attempted,
-            report.force_kill_required,
-            report.descendants_remaining,
-        );
-    }
-    let status = output
-        .status
-        .ok_or_else(|| anyhow::anyhow!("browser helper ended without a terminal process status"))?;
+    let output = command
+        .output()
+        .await
+        .with_context(|| format!("Failed to run browser bridge action '{}'.", action))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
-    if !status.success() {
+    if !output.status.success() {
         let details = if stderr.is_empty() {
             stdout
         } else if stdout.is_empty() {
