@@ -8,7 +8,7 @@ pub const DAANIO_TIER_ENV: &str = "DAANIO_TIER";
 pub const DAANIO_ENV_FILE: &str = "daanio.env";
 pub const DAANIO_CACHE_NAMESPACE: &str = "daanio-subscription";
 pub const DAANIO_SUBSCRIPTION_ACTIVE_ENV: &str = "DAANIO_SUBSCRIPTION_ACTIVE";
-pub const DEFAULT_DAANIO_API_BASE: &str = "https://api.daanio.com/v1";
+pub const DEFAULT_DAANIO_API_BASE: &str = "https://cli-api.daanio.com/v1";
 pub const DAANIO_PRICING_URL: &str = "https://daanio.com/pricing";
 pub const DAANIO_ACCOUNT_URL: &str = "https://daanio.com/account";
 pub const DAANIO_PROVIDER_DISPLAY_NAME: &str = "Daanio";
@@ -566,6 +566,11 @@ mod tests {
     #[test]
     fn default_model_matches_official_daanio_docs() {
         assert_eq!(default_model().id, "gpt-5.6-sol");
+    }
+
+    #[test]
+    fn default_api_base_uses_the_dedicated_cli_edge() {
+        assert_eq!(DEFAULT_DAANIO_API_BASE, "https://cli-api.daanio.com/v1");
     }
 
     #[test]

@@ -73,7 +73,7 @@ daanio connect
 ```
 
 Run `daanio --help` and `daanio <command> --help` for the complete command set.
-Daanio uses `https://api.daanio.com/v1` with a browser-authorized, revocable
+Daanio uses `https://cli-api.daanio.com/v1` with a browser-authorized, revocable
 gateway credential. See
 the official [Getting Started](https://daanio.com/docs/getting-started) and
 [Codex integration](https://daanio.com/docs/codex) guides. Do not enter an
