@@ -1921,6 +1921,30 @@ impl Provider for MultiProvider {
             anyhow::bail!("Model cannot be empty");
         }
 
+        // A Daanio catalog route owns the model name regardless of its family.
+        // Do not feed an unprefixed GPT/Claude model back through the global
+        // family heuristic: that would incorrectly select direct OpenAI or
+        // Anthropic credentials even though the user explicitly chose the
+        // managed Daanio route.
+        if selection.runtime_key == daanio_provider_core::RuntimeKey::DaanioSubscription {
+            self.ensure_provider_lock_allows_model_target(
+                ActiveProvider::OpenRouter,
+                &selection.routed_model_spec(),
+            )?;
+            if !crate::subscription_catalog::has_credentials() {
+                anyhow::bail!("Daanio credentials not available. Run `daanio login daanio` first.");
+            }
+            let provider: Arc<dyn Provider> = Arc::new(daanio::DaanioProvider::new());
+            provider.set_model(selection.model.trim())?;
+            *self
+                .openrouter
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(provider);
+            self.clear_active_openai_compatible_profile();
+            self.set_active_provider(ActiveProvider::OpenRouter);
+            return Ok(());
+        }
+
         // Routing-prefix policy lives once in RouteSelection::routed_model_spec
         // so this orchestrator and every single-runtime provider agree on the
         // spec string. set_model then dispatches it to the right sub-provider.

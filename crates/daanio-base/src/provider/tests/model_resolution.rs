@@ -15,6 +15,42 @@ fn test_provider_for_model_openai() {
 }
 
 #[test]
+fn daanio_route_selection_does_not_require_direct_family_credentials() {
+    let _lock = crate::storage::lock_test_env();
+    register_test_external_runtimes();
+    let temp = tempfile::TempDir::new().expect("create temp home");
+    let _daanio_home = OrEnvVarGuard::set("DAANIO_HOME", temp.path().join("daanio-home"));
+    let _home = OrEnvVarGuard::set("HOME", temp.path());
+    let _appdata = OrEnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
+    let _env = isolate_openrouter_autodetect_env_or();
+    let _daanio_key = OrEnvVarGuard::set(
+        crate::subscription_catalog::DAANIO_API_KEY_ENV,
+        "daanio-test-key",
+    );
+    crate::config::invalidate_config_cache();
+
+    let provider = MultiProvider::new_with_auth_status(crate::auth::AuthStatus::default());
+    for model in ["gpt-5.6-sol", "claude-opus-4-8"] {
+        let route = ModelRoute {
+            model: model.to_string(),
+            provider: crate::subscription_catalog::DAANIO_PROVIDER_DISPLAY_NAME.to_string(),
+            api_method: crate::subscription_catalog::DAANIO_ROUTE_API_METHOD.to_string(),
+            available: true,
+            detail: "managed server-side".to_string(),
+            cheapness: None,
+        };
+        let selection = RouteSelection::from_model_route(&route);
+
+        provider
+            .set_route_selection(&selection)
+            .unwrap_or_else(|error| panic!("Daanio route for {model} should stay managed: {error}"));
+
+        assert_eq!(provider.model(), model);
+        assert_eq!(provider.display_name(), "Daanio");
+    }
+}
+
+#[test]
 fn test_provider_for_model_gemini() {
     assert_eq!(provider_for_model("gemini-2.5-pro"), Some("gemini"));
     assert_eq!(provider_for_model("gemini-2.5-flash"), Some("gemini"));
