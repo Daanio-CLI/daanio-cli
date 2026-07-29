@@ -1,0 +1,10 @@
+{
+  "version": "0.2.13",
+  "date": "2026-07-29",
+  "title": "Portable Linux releases",
+  "fixes": [
+    "Linux x86_64 and ARM64 release binaries are built against the Ubuntu 20.04 runtime baseline",
+    "Email and IMAP connectivity now uses Rustls instead of linking to the host OpenSSL library",
+    "Release validation rejects Linux artifacts that depend on libssl or libcrypto"
+  ]
+}
