@@ -193,8 +193,23 @@ pub(super) async fn login_daanio_device_flow(no_browser: bool) -> Result<LoginCo
         "  {}",
         crate::cli::output::link(&device.verification_uri_complete)
     );
-    eprintln!("\n  Approve the request in your browser—no terminal email is needed.");
-    super::maybe_open_browser(&device.verification_uri_complete, no_browser);
+    eprintln!("\n  Approve the request in any browser—no terminal email is needed.");
+    let browser_opened = super::maybe_open_browser(&device.verification_uri_complete, no_browser);
+    if browser_opened {
+        eprintln!(
+            "  {}",
+            crate::cli::output::muted(
+                "Browser launch requested. If no window appeared, open the link above."
+            )
+        );
+    } else {
+        eprintln!(
+            "  {}",
+            crate::cli::output::muted(
+                "Browser did not open automatically. Open or copy the link above."
+            )
+        );
+    }
     eprintln!(
         "  {}",
         crate::cli::output::muted("Waiting for approval · Ctrl-C to cancel")

@@ -23,6 +23,14 @@ impl App {
         // developer's desktop).
         super::helpers::open_path_or_url_detached(url).is_ok()
     }
+    fn browser_link_fallback(url: &str, browser_opened: bool) -> String {
+        let launch_status = if browser_opened {
+            "A browser launch was requested. If no window appeared, open or copy the link above."
+        } else {
+            "The browser could not be opened automatically. Open or copy the link above."
+        };
+        format!("Browser sign-in link:\n{url}\n\n{launch_status}")
+    }
     fn record_oauth_preflight(
         provider_id: &str,
         browser_opened: bool,
@@ -662,13 +670,8 @@ impl App {
             let opened = App::open_auth_browser(&device.verification_uri_complete);
             publish(
                 format!(
-                    "Daanio Account Login\n\n{}\n\nApprove the request in the same browser. Daanio is waiting for the single-use exchange.{}",
-                    device.verification_uri_complete,
-                    if opened {
-                        ""
-                    } else {
-                        "\n\nThe browser could not be opened automatically. Open the public URL above manually."
-                    }
+                    "Daanio Account Login\n\n{}\n\nApprove the request in any browser. Daanio is waiting for the single-use exchange.",
+                    App::browser_link_fallback(&device.verification_uri_complete, opened),
                 ),
                 "Daanio account: waiting for browser approval",
             );
@@ -792,13 +795,8 @@ impl App {
         let url = crate::subscription_catalog::DAANIO_ACCOUNT_URL;
         let opened = Self::open_auth_browser(url);
         self.push_display_message(DisplayMessage::system(format!(
-            "Daanio Account Management\n\n{}{}",
-            url,
-            if opened {
-                "\n\nOpened in your browser."
-            } else {
-                "\n\nThe browser could not be opened automatically. Open the public URL above manually."
-            }
+            "Daanio Account Management\n\n{}",
+            Self::browser_link_fallback(url, opened),
         )));
         self.set_status_notice("Daanio account management");
     }

@@ -59,6 +59,26 @@ fn oauth_preflight_mentions_browser_fallback_and_doctor() {
 }
 
 #[test]
+fn browser_link_is_kept_when_launch_reports_success() {
+    let url = "https://daanio.com/device?code=one-time";
+    let message = App::browser_link_fallback(url, true);
+
+    assert!(message.contains("Browser sign-in link:"));
+    assert!(message.contains(url));
+    assert!(message.contains("If no window appeared"));
+}
+
+#[test]
+fn browser_link_is_kept_when_launch_fails() {
+    let url = "https://daanio.com/device?code=one-time";
+    let message = App::browser_link_fallback(url, false);
+
+    assert!(message.contains(url));
+    assert!(message.contains("could not be opened automatically"));
+    assert!(message.contains("Open or copy"));
+}
+
+#[test]
 fn oauth_preflight_mentions_manual_safe_callback_mode() {
     let message = App::record_oauth_preflight(
         "gemini",
