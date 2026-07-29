@@ -189,11 +189,11 @@ jobs:
       # Attach this platform's asset to the draft release. It remains hidden
       # until the final job verifies the complete release set.
       - name: Publish asset to release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${GITHUB_REF_NAME}" "dist/${{ matrix.artifact }}.tar.gz" --clobber
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/${{ matrix.artifact }}.tar.gz
+          fail_on_unmatched_files: true
 
   build-windows:
     name: Build (${{ matrix.target }})
