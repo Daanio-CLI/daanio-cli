@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 pub const MAX_REQUEST_BYTES: usize = 30 * 1024 * 1024;
 
 const MAX_TOOL_RESULT_BYTES_AFTER_COMPACTION: usize = 256 * 1024;
+const MAX_CONTEXT_CAPSULE_BYTES: usize = 64 * 1024;
+const MAX_CONTEXT_ITEM_BYTES: usize = 2 * 1024;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RequestSizeCompaction {
@@ -16,6 +18,7 @@ pub struct RequestSizeCompaction {
     pub images_omitted: usize,
     pub tool_results_truncated: usize,
     pub messages_dropped: usize,
+    pub context_capsule_bytes: usize,
 }
 
 /// Bound the exact serialized Anthropic request before it reaches the network.
@@ -54,10 +57,17 @@ pub fn compact_request_to_fit(
         stats.final_bytes = serialized_request_bytes(request)?;
     }
 
+    let mut dropped_messages = Vec::new();
     while stats.final_bytes > max_bytes && request.messages.len() > 1 {
-        request.messages.remove(0);
+        dropped_messages.push(request.messages.remove(0));
         stats.messages_dropped += 1;
         discard_leading_orphan_tool_results(&mut request.messages);
+        stats.final_bytes = serialized_request_bytes(request)?;
+    }
+
+    if !dropped_messages.is_empty() {
+        let capsule = build_context_capsule(&dropped_messages, MAX_CONTEXT_CAPSULE_BYTES);
+        stats.context_capsule_bytes = insert_context_capsule_to_fit(request, capsule, max_bytes)?;
         stats.final_bytes = serialized_request_bytes(request)?;
     }
 
@@ -69,6 +79,123 @@ pub fn compact_request_to_fit(
     }
 
     Ok(stats)
+}
+
+fn insert_context_capsule_to_fit(
+    request: &mut ApiRequest,
+    mut capsule: String,
+    max_bytes: usize,
+) -> Result<usize, String> {
+    while !capsule.is_empty() {
+        let mut candidate = request.clone();
+        insert_context_capsule(&mut candidate.messages, capsule.clone());
+        if serialized_request_bytes(&candidate)? <= max_bytes {
+            request.messages = candidate.messages;
+            return Ok(capsule.len());
+        }
+        capsule = truncate_owned_at_boundary(capsule, capsule.len() / 2);
+    }
+    Ok(0)
+}
+
+fn insert_context_capsule(messages: &mut Vec<ApiMessage>, capsule: String) {
+    let block = ApiContentBlock::Text {
+        text: capsule,
+        cache_control: None,
+    };
+    if let Some(first) = messages.first_mut()
+        && first.role == "user"
+    {
+        first.content.insert(0, block);
+    } else {
+        messages.insert(
+            0,
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![block],
+            },
+        );
+    }
+}
+
+fn build_context_capsule(messages: &[ApiMessage], max_bytes: usize) -> String {
+    let mut capsule = String::from(
+        "[Compacted earlier conversation context. Large binary data and verbose tool output were excluded.]\n",
+    );
+    for message in messages {
+        let role = if message.role == "assistant" {
+            "assistant"
+        } else {
+            "user"
+        };
+        for block in &message.content {
+            let summary = summarize_context_block(block);
+            if summary.is_empty() {
+                continue;
+            }
+            let line = format!("- {role}: {summary}\n");
+            if capsule.len().saturating_add(line.len()) > max_bytes {
+                capsule.push_str("- [Additional earlier context omitted.]\n");
+                return truncate_owned_at_boundary(capsule, max_bytes);
+            }
+            capsule.push_str(&line);
+        }
+    }
+    capsule
+}
+
+fn summarize_context_block(block: &ApiContentBlock) -> String {
+    match block {
+        ApiContentBlock::Text { text, .. } => compact_context_text(text),
+        ApiContentBlock::ToolUse {
+            id, name, input, ..
+        } => format!(
+            "tool call name={name} id={id} input={}",
+            compact_context_text(&input.to_string())
+        ),
+        ApiContentBlock::ToolResult {
+            tool_use_id,
+            content,
+            is_error,
+        } => {
+            let output = match content {
+                ToolResultContent::Text(text) => compact_context_text(text),
+                ToolResultContent::Blocks(blocks) => blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        ToolResultContentBlock::Text { text } => Some(compact_context_text(text)),
+                        ToolResultContentBlock::Image { .. } => None,
+                    })
+                    .filter(|text| !text.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+            };
+            format!("tool result id={tool_use_id} error={is_error} output={output}")
+        }
+        ApiContentBlock::Image { source } => format!(
+            "image omitted media_type={} original_base64_chars={}",
+            source.media_type,
+            source.data.len()
+        ),
+        ApiContentBlock::Thinking { .. } => String::new(),
+    }
+}
+
+fn compact_context_text(text: &str) -> String {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    truncate_owned_at_boundary(normalized, MAX_CONTEXT_ITEM_BYTES)
+}
+
+fn truncate_owned_at_boundary(mut value: String, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value.truncate(end);
+    value
 }
 
 fn serialized_request_bytes(request: &ApiRequest) -> Result<usize, String> {
@@ -1024,6 +1151,15 @@ mod request_size_tests {
     fn payload_preflight_truncates_large_tool_output() {
         let mut request = request(vec![
             message(
+                "assistant",
+                vec![ApiContentBlock::ToolUse {
+                    id: "tool-1".to_string(),
+                    name: "read".to_string(),
+                    input: json!({"file_path":"large.log"}),
+                    cache_control: None,
+                }],
+            ),
+            message(
                 "user",
                 vec![ApiContentBlock::ToolResult {
                     tool_use_id: "tool-1".to_string(),
@@ -1044,18 +1180,50 @@ mod request_size_tests {
     }
 
     #[test]
-    fn payload_preflight_drops_old_history_but_preserves_current_message() {
+    fn dropped_history_becomes_a_bounded_context_capsule() {
         let mut request = request(vec![
-            message("user", vec![text("old".repeat(300_000))]),
-            message("assistant", vec![text("old answer".repeat(100_000))]),
+            message(
+                "user",
+                vec![text(format!("oldest-marker {}", "a".repeat(20_000)))],
+            ),
+            message("assistant", vec![text("oldest-answer")]),
+            message("user", vec![text("recent question")]),
+            message("assistant", vec![text("recent answer")]),
             message("user", vec![text("current request")]),
         ]);
-        let stats = compact_request_to_fit(&mut request, 1000).unwrap();
-        assert!(stats.messages_dropped >= 2);
-        assert!(stats.final_bytes <= 1000);
+        let target = serde_json::to_vec(&request).unwrap().len() - 10_000;
+        let stats = compact_request_to_fit(&mut request, target).unwrap();
+        assert!(stats.messages_dropped >= 1);
+        assert!(stats.context_capsule_bytes > 0);
+        assert!(stats.context_capsule_bytes <= MAX_CONTEXT_CAPSULE_BYTES);
+        assert!(stats.final_bytes <= target);
         let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("Compacted earlier conversation context"));
+        assert!(json.contains("oldest-marker"));
         assert!(json.contains("current request"));
-        assert!(!json.contains("old answer"));
+    }
+
+    #[test]
+    fn context_capsule_is_deterministic_and_excludes_base64() {
+        let dropped = vec![message(
+            "user",
+            vec![
+                text("decision: keep retry policy"),
+                ApiContentBlock::Image {
+                    source: ApiImageSource {
+                        kind: "base64".to_string(),
+                        media_type: "image/png".to_string(),
+                        data: "SECRETBASE64".repeat(100),
+                    },
+                },
+            ],
+        )];
+        let first = build_context_capsule(&dropped, MAX_CONTEXT_CAPSULE_BYTES);
+        let second = build_context_capsule(&dropped, MAX_CONTEXT_CAPSULE_BYTES);
+        assert_eq!(first, second);
+        assert!(first.contains("decision: keep retry policy"));
+        assert!(first.contains("image omitted media_type=image/png"));
+        assert!(!first.contains("SECRETBASE64"));
     }
 
     #[test]

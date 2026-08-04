@@ -1040,12 +1040,13 @@ impl Provider for AnthropicProvider {
         .map_err(anyhow::Error::msg)?;
         if size_compaction.original_bytes != size_compaction.final_bytes {
             daanio_base::logging::warn(&format!(
-                "Anthropic request-size preflight compacted {} -> {} bytes (images omitted={}, tool results truncated={}, old messages dropped={})",
+                "Anthropic request-size preflight compacted {} -> {} bytes (images omitted={}, tool results truncated={}, old messages dropped={}, context capsule={} bytes)",
                 size_compaction.original_bytes,
                 size_compaction.final_bytes,
                 size_compaction.images_omitted,
                 size_compaction.tool_results_truncated,
                 size_compaction.messages_dropped,
+                size_compaction.context_capsule_bytes,
             ));
         }
 
@@ -1413,12 +1414,13 @@ impl Provider for AnthropicProvider {
         .map_err(anyhow::Error::msg)?;
         if size_compaction.original_bytes != size_compaction.final_bytes {
             daanio_base::logging::warn(&format!(
-                "Anthropic request-size preflight compacted {} -> {} bytes (images omitted={}, tool results truncated={}, old messages dropped={})",
+                "Anthropic request-size preflight compacted {} -> {} bytes (images omitted={}, tool results truncated={}, old messages dropped={}, context capsule={} bytes)",
                 size_compaction.original_bytes,
                 size_compaction.final_bytes,
                 size_compaction.images_omitted,
                 size_compaction.tool_results_truncated,
                 size_compaction.messages_dropped,
+                size_compaction.context_capsule_bytes,
             ));
         }
 
