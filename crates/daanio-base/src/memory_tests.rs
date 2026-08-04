@@ -42,6 +42,55 @@ where
 }
 
 #[test]
+fn manager_sanitizes_and_bounds_memory_before_restart_round_trip() {
+    with_temp_home(|project_dir| {
+        let manager = MemoryManager::new_test().with_project_dir(project_dir);
+        manager.clear_test_storage().expect("clear test memory");
+
+        let content = format!(
+            "Keep this decision.\nOPENAI_API_KEY=sk-proj-{}\n{}",
+            "x".repeat(40),
+            "ordinary prose ".repeat(2_000)
+        );
+        let id = manager
+            .remember_project(
+                MemoryEntry::new(MemoryCategory::Fact, content).with_source("session_restart"),
+            )
+            .expect("remember sanitized memory");
+
+        let reopened = MemoryManager::new_test().with_project_dir(project_dir);
+        let stored = reopened
+            .list_all()
+            .expect("load persisted memory")
+            .into_iter()
+            .find(|entry| entry.id == id)
+            .expect("stored entry");
+
+        assert!(stored.content.contains("Keep this decision."));
+        assert!(stored.content.contains("[REDACTED_SECRET]"));
+        assert!(!stored.content.contains("sk-proj-"));
+        assert!(stored.content.len() <= MemoryManager::MAX_STORED_MEMORY_BYTES);
+        assert_eq!(stored.source.as_deref(), Some("session_restart"));
+    });
+}
+
+#[test]
+fn manager_rejects_memory_that_is_only_base64_data() {
+    with_temp_home(|project_dir| {
+        let manager = MemoryManager::new_test().with_project_dir(project_dir);
+        manager.clear_test_storage().expect("clear test memory");
+        let encoded = format!("data:image/png;base64,{}", "A".repeat(512));
+
+        let err = manager
+            .remember_project(MemoryEntry::new(MemoryCategory::Fact, encoded))
+            .expect_err("base64-only memory must be rejected");
+
+        assert!(err.to_string().contains("binary/base64"));
+        assert!(manager.list_all().expect("list memories").is_empty());
+    });
+}
+
+#[test]
 fn pending_memory_freshness_and_clear() {
     let _guard = PENDING_MEMORY_TEST_LOCK
         .lock()

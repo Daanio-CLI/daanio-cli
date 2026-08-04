@@ -194,6 +194,76 @@ pub struct MemoryManager {
 }
 
 impl MemoryManager {
+    const MAX_STORED_MEMORY_BYTES: usize = 8 * 1024;
+
+    fn looks_like_base64_blob(text: &str) -> bool {
+        let trimmed = text.trim();
+        if trimmed.len() < 256 {
+            return false;
+        }
+        if trimmed.to_ascii_lowercase().starts_with("data:") && trimmed.contains(";base64,") {
+            return true;
+        }
+
+        let whitespace = trimmed.chars().filter(|ch| ch.is_whitespace()).count();
+        if whitespace > 2 {
+            return false;
+        }
+        let compact_len = trimmed.chars().filter(|ch| !ch.is_whitespace()).count();
+        if compact_len < 256 {
+            return false;
+        }
+        let base64ish = trimmed
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '/' | '=' | '-' | '_'))
+            .count();
+        base64ish.saturating_mul(100) / compact_len >= 95
+    }
+
+    fn truncate_utf8(text: &str, max_bytes: usize) -> String {
+        if text.len() <= max_bytes {
+            return text.to_string();
+        }
+        const ELLIPSIS: &str = "…";
+        if max_bytes < ELLIPSIS.len() {
+            return String::new();
+        }
+        let mut end = max_bytes - ELLIPSIS.len();
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}{}", text[..end].trim_end(), ELLIPSIS)
+    }
+
+    fn sanitize_entry_for_storage(mut entry: MemoryEntry) -> Result<MemoryEntry> {
+        let mut kept = Vec::new();
+        let mut omitted_binary = false;
+        for line in entry.content.lines() {
+            if Self::looks_like_base64_blob(line) {
+                omitted_binary = true;
+                continue;
+            }
+            kept.push(line);
+        }
+
+        let content = kept.join("\n");
+        let content = crate::message::redact_secrets(content.trim())
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            anyhow::bail!(if omitted_binary {
+                "memory contained only binary/base64 data"
+            } else {
+                "memory content is empty"
+            });
+        }
+
+        entry.content = Self::truncate_utf8(&content, Self::MAX_STORED_MEMORY_BYTES);
+        entry.refresh_search_text();
+        Ok(entry)
+    }
+
     pub fn new() -> Self {
         Self {
             project_dir: None,
@@ -394,7 +464,7 @@ impl MemoryManager {
     const STORAGE_DEDUP_THRESHOLD: f32 = 0.85;
 
     pub fn remember_project(&self, entry: MemoryEntry) -> Result<String> {
-        let mut entry = entry;
+        let mut entry = Self::sanitize_entry_for_storage(entry)?;
         if self.should_generate_embedding_for_entry(&entry) {
             entry.ensure_embedding();
         }
@@ -429,7 +499,7 @@ impl MemoryManager {
     }
 
     pub fn remember_global(&self, entry: MemoryEntry) -> Result<String> {
-        let mut entry = entry;
+        let mut entry = Self::sanitize_entry_for_storage(entry)?;
         if self.should_generate_embedding_for_entry(&entry) {
             entry.ensure_embedding();
         }
@@ -470,6 +540,7 @@ impl MemoryManager {
     /// Preserves existing inbound/outbound graph relationships while refreshing
     /// content and tags.
     pub fn upsert_project_memory(&self, entry: MemoryEntry) -> Result<String> {
+        let entry = Self::sanitize_entry_for_storage(entry)?;
         let mut graph = self.load_project_graph()?;
         let id = self.upsert_memory_in_graph(&mut graph, entry);
         self.save_project_graph(&graph)?;
@@ -480,6 +551,7 @@ impl MemoryManager {
     /// Preserves existing inbound/outbound graph relationships while refreshing
     /// content and tags.
     pub fn upsert_global_memory(&self, entry: MemoryEntry) -> Result<String> {
+        let entry = Self::sanitize_entry_for_storage(entry)?;
         let mut graph = self.load_global_graph()?;
         let id = self.upsert_memory_in_graph(&mut graph, entry);
         self.save_global_graph(&graph)?;

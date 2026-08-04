@@ -654,11 +654,62 @@ pub fn format_entries_for_prompt(entries: &[MemoryEntry], limit: usize) -> Optio
 }
 
 pub fn format_relevant_prompt(entries: &[MemoryEntry], limit: usize) -> Option<String> {
-    format_entries_for_prompt(entries, limit).map(|formatted| format!("# Memory\n\n{formatted}"))
+    format_entries_for_prompt(entries, limit)
+        .map(|formatted| format!("{MEMORY_PROMPT_HEADER}{formatted}"))
 }
 
 pub fn format_relevant_display_prompt(entries: &[MemoryEntry], limit: usize) -> Option<String> {
     format_entries_for_prompt_with_header(entries, limit, true, true)
+}
+
+const MAX_MEMORY_PROMPT_BYTES: usize = 32 * 1024;
+const MAX_MEMORY_PROMPT_ITEM_BYTES: usize = 2 * 1024;
+const MEMORY_PROMPT_HEADER: &str = "# Memory\n\n";
+const MAX_MEMORY_PROMPT_BODY_BYTES: usize = MAX_MEMORY_PROMPT_BYTES - MEMORY_PROMPT_HEADER.len();
+
+fn truncate_utf8(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    const ELLIPSIS: &str = "…";
+    if max_bytes < ELLIPSIS.len() {
+        return String::new();
+    }
+    let mut end = max_bytes - ELLIPSIS.len();
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{}", text[..end].trim_end(), ELLIPSIS)
+}
+
+fn memory_source_locator(entry: &MemoryEntry) -> String {
+    fn safe_component(value: &str, max_bytes: usize) -> String {
+        let normalized: String = value
+            .trim()
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/') {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        truncate_utf8(&normalized, max_bytes)
+    }
+
+    let id = safe_component(&entry.id, 256);
+    let mut locator = format!("memory:{id}");
+    if let Some(source) = entry
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        locator.push_str(" source:");
+        locator.push_str(&safe_component(source, 256));
+    }
+    locator
 }
 
 fn format_entries_for_prompt_with_header(
@@ -689,18 +740,41 @@ fn format_entries_for_prompt_with_header(
     ];
 
     let mut write_section = |title: &str, items: Vec<&MemoryEntry>| {
-        if !output.is_empty() {
-            output.push('\n');
+        let prefix = if output.is_empty() { "" } else { "\n" };
+        let heading = format!("{prefix}## {title}\n");
+        if output.len() + heading.len() > MAX_MEMORY_PROMPT_BODY_BYTES {
+            return;
         }
-        output.push_str(&format!("## {title}\n"));
+
+        let section_start = output.len();
+        output.push_str(&heading);
+        let mut wrote_item = false;
         for (idx, item) in items.into_iter().enumerate() {
-            output.push_str(&format!("{}. {}\n", idx + 1, item.content.trim()));
-            if include_updated_at_comments {
-                output.push_str(&format!(
-                    "<!-- updated_at: {} -->\n",
-                    item.updated_at.to_rfc3339()
-                ));
+            let locator = memory_source_locator(item);
+            let suffix = format!(" [ref: {locator}]\n");
+            let metadata = if include_updated_at_comments {
+                format!("<!-- updated_at: {} -->\n", item.updated_at.to_rfc3339())
+            } else {
+                String::new()
+            };
+            let prefix = format!("{}. ", idx + 1);
+            let framing_bytes = prefix.len() + suffix.len() + metadata.len();
+            if framing_bytes >= MAX_MEMORY_PROMPT_ITEM_BYTES {
+                continue;
             }
+            let content = truncate_utf8(
+                item.content.trim(),
+                MAX_MEMORY_PROMPT_ITEM_BYTES - framing_bytes,
+            );
+            let rendered = format!("{prefix}{content}{suffix}{metadata}");
+            if output.len() + rendered.len() > MAX_MEMORY_PROMPT_BODY_BYTES {
+                break;
+            }
+            output.push_str(&rendered);
+            wrote_item = true;
+        }
+        if !wrote_item {
+            output.truncate(section_start);
         }
     };
 
@@ -832,6 +906,52 @@ pub fn normalize_memory_search_text(content: &str, tags: &[String]) -> String {
 
 pub fn memory_matches_search(memory: &MemoryEntry, normalized_query: &str) -> bool {
     memory.searchable_text().contains(normalized_query)
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    use super::*;
+
+    fn memory(id: &str, content: &str, source: Option<&str>) -> MemoryEntry {
+        MemoryEntry::new(MemoryCategory::Fact, content)
+            .with_id(id)
+            .with_source(source.unwrap_or_default())
+    }
+
+    #[test]
+    fn relevant_prompt_includes_recoverable_memory_and_source_references() {
+        let entry = memory(
+            "mem_exact_123",
+            "Use the durable cache",
+            Some("session_abc"),
+        );
+        let prompt = format_relevant_prompt(&[entry], 5).expect("memory prompt");
+
+        assert!(prompt.contains("Use the durable cache"));
+        assert!(prompt.contains("[ref: memory:mem_exact_123 source:session_abc]"));
+    }
+
+    #[test]
+    fn relevant_prompt_is_deterministic_and_bounded() {
+        let entries: Vec<_> = (0..40)
+            .map(|idx| {
+                memory(
+                    &format!("mem_{idx:02}"),
+                    &format!("item {idx}: {}", "é".repeat(3000)),
+                    Some("session_bound"),
+                )
+            })
+            .collect();
+
+        let first = format_relevant_prompt(&entries, entries.len()).expect("first prompt");
+        let second = format_relevant_prompt(&entries, entries.len()).expect("second prompt");
+
+        assert_eq!(first, second);
+        assert!(first.len() <= MAX_MEMORY_PROMPT_BYTES);
+        assert!(first.is_char_boundary(first.len()));
+        assert!(first.contains("memory:mem_00"));
+        assert!(!first.contains("memory:mem_39"));
+    }
 }
 
 pub mod ranking {
