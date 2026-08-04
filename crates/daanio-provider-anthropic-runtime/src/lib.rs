@@ -37,6 +37,7 @@ use daanio_message_types::{Message, StreamEvent, ToolDefinition};
 use daanio_provider_anthropic::{ApiContentBlock, ToolResultContent, ToolResultContentBlock};
 use daanio_provider_anthropic::{
     ApiMessage, ApiMetadata, ApiOutputConfig, ApiRequest, ApiSystem, ApiThinking, ApiTool,
+    preflight_messages_request,
 };
 use daanio_provider_core::{
     anthropic_is_1m_model as is_1m_model,
@@ -1033,18 +1034,16 @@ impl Provider for AnthropicProvider {
             stream: true,
         };
 
-        let size_compaction = daanio_provider_anthropic::compact_request_to_fit(
-            &mut request,
-            daanio_provider_anthropic::MAX_REQUEST_BYTES,
-        )
-        .map_err(anyhow::Error::msg)?;
-        if size_compaction.original_bytes != size_compaction.final_bytes {
+        let size_compaction = preflight_messages_request(&mut request)?;
+        if size_compaction.compacted() {
             daanio_base::logging::warn(&format!(
-                "Anthropic request-size preflight compacted {} -> {} bytes (images omitted={}, tool results truncated={}, old messages dropped={}, context capsule={} bytes)",
+                "Anthropic request-size preflight compacted {} -> {} bytes (images omitted={}, tool results truncated={}, history blocks truncated={}, thinking blocks omitted={}, old messages dropped={}, context capsule={} bytes)",
                 size_compaction.original_bytes,
                 size_compaction.final_bytes,
                 size_compaction.images_omitted,
                 size_compaction.tool_results_truncated,
+                size_compaction.history_blocks_truncated,
+                size_compaction.thinking_blocks_omitted,
                 size_compaction.messages_dropped,
                 size_compaction.context_capsule_bytes,
             ));
@@ -1407,18 +1406,16 @@ impl Provider for AnthropicProvider {
             stream: true,
         };
 
-        let size_compaction = daanio_provider_anthropic::compact_request_to_fit(
-            &mut request,
-            daanio_provider_anthropic::MAX_REQUEST_BYTES,
-        )
-        .map_err(anyhow::Error::msg)?;
-        if size_compaction.original_bytes != size_compaction.final_bytes {
+        let size_compaction = preflight_messages_request(&mut request)?;
+        if size_compaction.compacted() {
             daanio_base::logging::warn(&format!(
-                "Anthropic request-size preflight compacted {} -> {} bytes (images omitted={}, tool results truncated={}, old messages dropped={}, context capsule={} bytes)",
+                "Anthropic split request-size preflight compacted {} -> {} bytes (images omitted={}, tool results truncated={}, history blocks truncated={}, thinking blocks omitted={}, old messages dropped={}, context capsule={} bytes)",
                 size_compaction.original_bytes,
                 size_compaction.final_bytes,
                 size_compaction.images_omitted,
                 size_compaction.tool_results_truncated,
+                size_compaction.history_blocks_truncated,
+                size_compaction.thinking_blocks_omitted,
                 size_compaction.messages_dropped,
                 size_compaction.context_capsule_bytes,
             ));

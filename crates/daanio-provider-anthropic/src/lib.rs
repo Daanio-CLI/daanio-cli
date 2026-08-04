@@ -2,37 +2,132 @@ use daanio_message_types::{ContentBlock, Message, Role, ToolDefinition, sanitize
 use daanio_provider_core::anthropic_map_tool_name_for_oauth as map_tool_name_for_oauth;
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::fmt;
 
 /// Anthropic rejects Messages API bodies at roughly 32 MiB. Keep two MiB of
 /// headroom for gateway differences and future envelope fields.
 pub const MAX_REQUEST_BYTES: usize = 30 * 1024 * 1024;
 
-const MAX_TOOL_RESULT_BYTES_AFTER_COMPACTION: usize = 256 * 1024;
+const RECENT_MESSAGES_TO_PRESERVE: usize = 3;
+const TOOL_RESULT_MIN_BYTES: usize = 1024;
+const HISTORY_TEXT_MIN_BYTES: usize = 2048;
+const COMPACTION_HEADROOM_BYTES: usize = 4096;
 const MAX_CONTEXT_CAPSULE_BYTES: usize = 64 * 1024;
 const MAX_CONTEXT_ITEM_BYTES: usize = 2 * 1024;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RequestSizeCompaction {
     pub original_bytes: usize,
     pub final_bytes: usize,
     pub images_omitted: usize,
     pub tool_results_truncated: usize,
+    pub history_blocks_truncated: usize,
+    pub thinking_blocks_omitted: usize,
     pub messages_dropped: usize,
     pub context_capsule_bytes: usize,
 }
 
-/// Bound the exact serialized Anthropic request before it reaches the network.
-///
-/// Token accounting cannot protect this limit because inline base64 images and
-/// verbose tool results can be many megabytes while costing relatively few
-/// model tokens. Reduction is deliberately ordered from least to most lossy:
-/// old inline images, old large tool results, then complete old messages. The
-/// newest message and system/tool definitions are never silently truncated.
-pub fn compact_request_to_fit(
+impl RequestSizeCompaction {
+    pub fn compacted(&self) -> bool {
+        self.original_bytes != self.final_bytes
+    }
+}
+
+#[derive(Debug)]
+pub struct RequestSizeError {
+    pub original_bytes: usize,
+    pub final_bytes: usize,
+    pub limit_bytes: usize,
+    pub system_bytes: usize,
+    pub tools_bytes: usize,
+    pub messages_bytes: usize,
+    serialization_error: Option<serde_json::Error>,
+}
+
+impl RequestSizeError {
+    fn serialization(error: serde_json::Error) -> Self {
+        Self {
+            original_bytes: 0,
+            final_bytes: 0,
+            limit_bytes: 0,
+            system_bytes: 0,
+            tools_bytes: 0,
+            messages_bytes: 0,
+            serialization_error: Some(error),
+        }
+    }
+
+    fn too_large(
+        request: &ApiRequest,
+        original_bytes: usize,
+        final_bytes: usize,
+        limit_bytes: usize,
+    ) -> Self {
+        Self {
+            original_bytes,
+            final_bytes,
+            limit_bytes,
+            system_bytes: serialized_len(&request.system).unwrap_or(0),
+            tools_bytes: serialized_len(&request.tools).unwrap_or(0),
+            messages_bytes: serialized_len(&request.messages).unwrap_or(0),
+            serialization_error: None,
+        }
+    }
+}
+
+impl fmt::Display for RequestSizeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(error) = &self.serialization_error {
+            return write!(
+                formatter,
+                "Could not serialize the Anthropic /v1/messages payload locally: {error}"
+            );
+        }
+        write!(
+            formatter,
+            "Anthropic /v1/messages payload is {} bytes after local compaction (initially {} bytes; safe limit {} bytes below the provider's ~32 MiB cap). Preserved components include about {} bytes of system prompt, {} bytes of tool definitions, and {} bytes of messages. Shorten system/instruction files or tool schemas, remove or resize attachments, redirect large tool output to a file and read targeted sections, shorten the latest prompt, or start a new/compacted conversation.",
+            self.final_bytes,
+            self.original_bytes,
+            self.limit_bytes,
+            self.system_bytes,
+            self.tools_bytes,
+            self.messages_bytes,
+        )
+    }
+}
+
+impl std::error::Error for RequestSizeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.serialization_error
+            .as_ref()
+            .map(|error| error as &(dyn std::error::Error + 'static))
+    }
+}
+
+fn serialized_len<T: Serialize + ?Sized>(value: &T) -> Result<usize, serde_json::Error> {
+    serde_json::to_vec(value).map(|body| body.len())
+}
+
+/// Return the exact compact serde JSON byte length used for the outbound body.
+pub fn serialized_request_len(request: &ApiRequest) -> Result<usize, RequestSizeError> {
+    serialized_len(request).map_err(RequestSizeError::serialization)
+}
+
+/// Bound the final serialized Anthropic request before it reaches the network.
+/// This runs after system blocks, tool schemas, cache markers, metadata, base64,
+/// and tool outputs have all been placed in the exact outbound `ApiRequest`.
+pub fn preflight_messages_request(
+    request: &mut ApiRequest,
+) -> Result<RequestSizeCompaction, RequestSizeError> {
+    preflight_messages_request_with_limit(request, MAX_REQUEST_BYTES)
+}
+
+/// Explicit-limit seam used by focused boundary tests.
+pub fn preflight_messages_request_with_limit(
     request: &mut ApiRequest,
     max_bytes: usize,
-) -> Result<RequestSizeCompaction, String> {
-    let original_bytes = serialized_request_bytes(request)?;
+) -> Result<RequestSizeCompaction, RequestSizeError> {
+    let original_bytes = serialized_request_len(request)?;
     let mut stats = RequestSizeCompaction {
         original_bytes,
         final_bytes: original_bytes,
@@ -42,58 +137,299 @@ pub fn compact_request_to_fit(
         return Ok(stats);
     }
 
-    while stats.final_bytes > max_bytes && omit_oldest_image(&mut request.messages) {
-        stats.images_omitted += 1;
-        stats.final_bytes = serialized_request_bytes(request)?;
-    }
+    let mut dropped_messages = Vec::new();
 
-    while stats.final_bytes > max_bytes
-        && truncate_oldest_large_tool_result(
-            &mut request.messages,
-            MAX_TOOL_RESULT_BYTES_AFTER_COMPACTION,
-        )
+    // Prefer whole old turns over mutating recent useful context. A suffix is
+    // accepted only when roles alternate and every tool_use/tool_result relation
+    // remains intact, so tool exchanges are removed as an atomic history unit.
+    drop_oldest_valid_prefixes(
+        request,
+        max_bytes,
+        RECENT_MESSAGES_TO_PRESERVE,
+        &mut dropped_messages,
+        &mut stats,
+    )?;
+
+    while serialized_request_len(request)? > max_bytes && omit_oldest_image(request) {
+        stats.images_omitted += 1;
+    }
+    while serialized_request_len(request)? > max_bytes
+        && truncate_oldest_tool_result(request, max_bytes)?
     {
         stats.tool_results_truncated += 1;
-        stats.final_bytes = serialized_request_bytes(request)?;
+    }
+    while serialized_request_len(request)? > max_bytes && omit_oldest_thinking(request) {
+        stats.thinking_blocks_omitted += 1;
+    }
+    while serialized_request_len(request)? > max_bytes
+        && truncate_oldest_history_text(request, max_bytes)?
+    {
+        stats.history_blocks_truncated += 1;
     }
 
-    let mut dropped_messages = Vec::new();
-    while stats.final_bytes > max_bytes && request.messages.len() > 1 {
-        dropped_messages.push(request.messages.remove(0));
-        stats.messages_dropped += 1;
-        discard_leading_orphan_tool_results(&mut request.messages);
-        stats.final_bytes = serialized_request_bytes(request)?;
+    // If recent history itself remains unusually dense, retain the newest valid
+    // structural suffix. The newest message is never silently text-truncated.
+    drop_oldest_valid_prefixes(request, max_bytes, 1, &mut dropped_messages, &mut stats)?;
+
+    stats.final_bytes = serialized_request_len(request)?;
+    if stats.final_bytes > max_bytes {
+        return Err(RequestSizeError::too_large(
+            request,
+            stats.original_bytes,
+            stats.final_bytes,
+            max_bytes,
+        ));
     }
 
     if !dropped_messages.is_empty() {
         let capsule = build_context_capsule(&dropped_messages, MAX_CONTEXT_CAPSULE_BYTES);
         stats.context_capsule_bytes = insert_context_capsule_to_fit(request, capsule, max_bytes)?;
-        stats.final_bytes = serialized_request_bytes(request)?;
-    }
-
-    if stats.final_bytes > max_bytes {
-        return Err(format!(
-            "Anthropic request is {} bytes after removing old images, truncating old tool outputs, and dropping old conversation history; the configured safe limit is {} bytes. The current message, system prompt, or tool definitions are individually too large. Remove or split the newest attachment/output and retry.",
-            stats.final_bytes, max_bytes
-        ));
+        stats.final_bytes = serialized_request_len(request)?;
     }
 
     Ok(stats)
+}
+
+fn drop_oldest_valid_prefixes(
+    request: &mut ApiRequest,
+    max_bytes: usize,
+    minimum_remaining: usize,
+    dropped_messages: &mut Vec<ApiMessage>,
+    stats: &mut RequestSizeCompaction,
+) -> Result<(), RequestSizeError> {
+    while serialized_request_len(request)? > max_bytes {
+        let max_drop = request.messages.len().saturating_sub(minimum_remaining);
+        let Some(prefix_len) =
+            (1..=max_drop).find(|&start| valid_anthropic_history(&request.messages[start..]))
+        else {
+            break;
+        };
+        dropped_messages.extend(request.messages.drain(..prefix_len));
+        stats.messages_dropped += prefix_len;
+    }
+    Ok(())
+}
+
+fn valid_anthropic_history(messages: &[ApiMessage]) -> bool {
+    if messages.is_empty() || messages[0].role != "user" {
+        return false;
+    }
+    if messages.windows(2).any(|pair| pair[0].role == pair[1].role) {
+        return false;
+    }
+    for (index, message) in messages.iter().enumerate() {
+        for block in &message.content {
+            match block {
+                ApiContentBlock::ToolUse { id, .. } => {
+                    let matched = message.role == "assistant"
+                        && messages.get(index + 1).is_some_and(|next| {
+                            next.role == "user"
+                                && next.content.iter().any(|candidate| {
+                                    matches!(
+                                        candidate,
+                                        ApiContentBlock::ToolResult { tool_use_id, .. }
+                                            if tool_use_id == id
+                                    )
+                                })
+                        });
+                    if !matched {
+                        return false;
+                    }
+                }
+                ApiContentBlock::ToolResult { tool_use_id, .. } => {
+                    let matched = message.role == "user"
+                        && index > 0
+                        && messages[index - 1].role == "assistant"
+                        && messages[index - 1].content.iter().any(|candidate| {
+                            matches!(
+                                candidate,
+                                ApiContentBlock::ToolUse { id, .. } if id == tool_use_id
+                            )
+                        });
+                    if !matched {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    true
+}
+
+fn omit_oldest_image(request: &mut ApiRequest) -> bool {
+    for message in &mut request.messages {
+        for block in &mut message.content {
+            match block {
+                ApiContentBlock::Image { source } => {
+                    let notice = image_omitted_notice(source);
+                    *block = ApiContentBlock::Text {
+                        text: notice,
+                        cache_control: None,
+                    };
+                    return true;
+                }
+                ApiContentBlock::ToolResult {
+                    content: ToolResultContent::Blocks(blocks),
+                    ..
+                } => {
+                    if let Some(index) = blocks
+                        .iter()
+                        .position(|item| matches!(item, ToolResultContentBlock::Image { .. }))
+                    {
+                        let ToolResultContentBlock::Image { source } = &blocks[index] else {
+                            unreachable!();
+                        };
+                        blocks[index] = ToolResultContentBlock::Text {
+                            text: image_omitted_notice(source),
+                        };
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
+fn image_omitted_notice(source: &ApiImageSource) -> String {
+    format!(
+        "[Image omitted by daanio because the serialized Anthropic request exceeded the safe payload limit: media_type={}, original_base64_chars={}. Reattach a smaller image if it is still needed.]",
+        source.media_type,
+        source.data.len()
+    )
+}
+
+fn truncate_oldest_tool_result(
+    request: &mut ApiRequest,
+    max_bytes: usize,
+) -> Result<bool, RequestSizeError> {
+    let excess = serialized_request_len(request)?.saturating_sub(max_bytes);
+    for message in &mut request.messages {
+        for block in &mut message.content {
+            let ApiContentBlock::ToolResult { content, .. } = block else {
+                continue;
+            };
+            match content {
+                ToolResultContent::Text(text) => {
+                    if compact_text(text, excess, TOOL_RESULT_MIN_BYTES, "Tool output") {
+                        return Ok(true);
+                    }
+                }
+                ToolResultContent::Blocks(blocks) => {
+                    for block in blocks {
+                        if let ToolResultContentBlock::Text { text } = block
+                            && compact_text(text, excess, TOOL_RESULT_MIN_BYTES, "Tool output")
+                        {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn omit_oldest_thinking(request: &mut ApiRequest) -> bool {
+    for message in &mut request.messages {
+        if let Some(index) = message
+            .content
+            .iter()
+            .position(|block| matches!(block, ApiContentBlock::Thinking { .. }))
+        {
+            if message.content.len() == 1 {
+                message.content[index] = ApiContentBlock::Text {
+                    text: "[Earlier signed thinking omitted by daanio to fit the Anthropic request payload limit.]".to_string(),
+                    cache_control: None,
+                };
+            } else {
+                message.content.remove(index);
+            }
+            return true;
+        }
+    }
+    false
+}
+
+fn truncate_oldest_history_text(
+    request: &mut ApiRequest,
+    max_bytes: usize,
+) -> Result<bool, RequestSizeError> {
+    let excess = serialized_request_len(request)?.saturating_sub(max_bytes);
+    let history_len = request.messages.len().saturating_sub(1);
+    for message in &mut request.messages[..history_len] {
+        for block in &mut message.content {
+            if let ApiContentBlock::Text { text, .. } = block
+                && compact_text(
+                    text,
+                    excess,
+                    HISTORY_TEXT_MIN_BYTES,
+                    "Earlier conversation content",
+                )
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn compact_text(text: &mut String, excess: usize, minimum: usize, label: &str) -> bool {
+    if text.len() <= minimum {
+        return false;
+    }
+    let original_bytes = text.len();
+    let target = original_bytes
+        .saturating_sub(excess.saturating_add(COMPACTION_HEADROOM_BYTES))
+        .max(minimum)
+        .min(original_bytes);
+    if target >= original_bytes {
+        return false;
+    }
+    let marker = format!(
+        "\n\n[{label} truncated by daanio to fit the Anthropic request payload: kept selected content from {original_bytes} UTF-8 bytes. Read a targeted section or start a compacted conversation for omitted content.]\n\n"
+    );
+    let content_budget = target.saturating_sub(marker.len());
+    let head_budget = content_budget.saturating_mul(3) / 4;
+    let tail_budget = content_budget.saturating_sub(head_budget);
+    let head_end = floor_char_boundary(text, head_budget);
+    let tail_start = ceil_char_boundary(text, text.len().saturating_sub(tail_budget));
+    *text = format!("{}{}{}", &text[..head_end], marker, &text[tail_start..]);
+    true
+}
+
+fn floor_char_boundary(value: &str, mut index: usize) -> usize {
+    index = index.min(value.len());
+    while index > 0 && !value.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+fn ceil_char_boundary(value: &str, mut index: usize) -> usize {
+    index = index.min(value.len());
+    while index < value.len() && !value.is_char_boundary(index) {
+        index += 1;
+    }
+    index
 }
 
 fn insert_context_capsule_to_fit(
     request: &mut ApiRequest,
     mut capsule: String,
     max_bytes: usize,
-) -> Result<usize, String> {
+) -> Result<usize, RequestSizeError> {
     while !capsule.is_empty() {
         let mut candidate = request.clone();
         insert_context_capsule(&mut candidate.messages, capsule.clone());
-        if serialized_request_bytes(&candidate)? <= max_bytes {
+        if serialized_request_len(&candidate)? <= max_bytes {
             request.messages = candidate.messages;
             return Ok(capsule.len());
         }
-        capsule = truncate_owned_at_boundary(capsule, capsule.len() / 2);
+        let next_len = capsule.len() / 2;
+        capsule = truncate_owned_at_boundary(capsule, next_len);
     }
     Ok(0)
 }
@@ -190,124 +526,9 @@ fn truncate_owned_at_boundary(mut value: String, max_bytes: usize) -> String {
     if value.len() <= max_bytes {
         return value;
     }
-    let mut end = max_bytes;
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = floor_char_boundary(&value, max_bytes);
     value.truncate(end);
     value
-}
-
-fn serialized_request_bytes(request: &ApiRequest) -> Result<usize, String> {
-    serde_json::to_vec(request)
-        .map(|body| body.len())
-        .map_err(|error| format!("failed to serialize Anthropic request: {error}"))
-}
-
-fn omitted_image_text(source: &ApiImageSource) -> String {
-    format!(
-        "[Older inline image omitted before sending because the serialized request approached the provider size limit: media_type={}, original_base64_chars={}. Re-open or re-attach the image if it is still needed.]",
-        source.media_type,
-        source.data.len()
-    )
-}
-
-fn omit_oldest_image(messages: &mut [ApiMessage]) -> bool {
-    for message in messages {
-        for block in &mut message.content {
-            match block {
-                ApiContentBlock::Image { source } => {
-                    let text = omitted_image_text(source);
-                    *block = ApiContentBlock::Text {
-                        text,
-                        cache_control: None,
-                    };
-                    return true;
-                }
-                ApiContentBlock::ToolResult { content, .. } => {
-                    let ToolResultContent::Blocks(blocks) = content else {
-                        continue;
-                    };
-                    if let Some(index) = blocks
-                        .iter()
-                        .position(|item| matches!(item, ToolResultContentBlock::Image { .. }))
-                    {
-                        let ToolResultContentBlock::Image { source } = &blocks[index] else {
-                            unreachable!();
-                        };
-                        let text = omitted_image_text(source);
-                        blocks[index] = ToolResultContentBlock::Text { text };
-                        return true;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    false
-}
-
-fn truncate_text_for_payload(text: &mut String, max_bytes: usize) -> bool {
-    if text.len() <= max_bytes {
-        return false;
-    }
-    let original_bytes = text.len();
-    let head_budget = max_bytes.saturating_mul(3) / 4;
-    let tail_budget = max_bytes.saturating_sub(head_budget);
-    let mut head_end = head_budget.min(text.len());
-    while head_end > 0 && !text.is_char_boundary(head_end) {
-        head_end -= 1;
-    }
-    let mut tail_start = text.len().saturating_sub(tail_budget);
-    while tail_start < text.len() && !text.is_char_boundary(tail_start) {
-        tail_start += 1;
-    }
-    let marker = format!(
-        "\n\n... [{} bytes truncated before sending because the request approached the provider size limit] ...\n\n",
-        original_bytes.saturating_sub(head_end + text.len().saturating_sub(tail_start))
-    );
-    *text = format!("{}{}{}", &text[..head_end], marker, &text[tail_start..]);
-    true
-}
-
-fn truncate_oldest_large_tool_result(messages: &mut [ApiMessage], max_bytes: usize) -> bool {
-    for message in messages {
-        for block in &mut message.content {
-            let ApiContentBlock::ToolResult { content, .. } = block else {
-                continue;
-            };
-            match content {
-                ToolResultContent::Text(text) => {
-                    if truncate_text_for_payload(text, max_bytes) {
-                        return true;
-                    }
-                }
-                ToolResultContent::Blocks(blocks) => {
-                    for item in blocks {
-                        if let ToolResultContentBlock::Text { text } = item
-                            && truncate_text_for_payload(text, max_bytes)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
-}
-
-fn discard_leading_orphan_tool_results(messages: &mut Vec<ApiMessage>) {
-    while let Some(first) = messages.first_mut() {
-        first
-            .content
-            .retain(|block| !matches!(block, ApiContentBlock::ToolResult { .. }));
-        if first.content.is_empty() {
-            messages.remove(0);
-        } else {
-            break;
-        }
-    }
 }
 
 /// Claude Code billing attribution text observed in the official CLI's system
@@ -1116,12 +1337,26 @@ mod request_size_tests {
     }
 
     #[test]
-    fn payload_below_limit_is_unchanged() {
+    fn exact_serialized_boundary_is_accepted_unchanged() {
         let mut request = request(vec![message("user", vec![text("hello")])]);
         let before = serde_json::to_vec(&request).unwrap();
-        let stats = compact_request_to_fit(&mut request, before.len()).unwrap();
+        let stats = preflight_messages_request_with_limit(&mut request, before.len()).unwrap();
         assert_eq!(stats.original_bytes, stats.final_bytes);
+        assert_eq!(serialized_request_len(&request).unwrap(), before.len());
         assert_eq!(serde_json::to_vec(&request).unwrap(), before);
+    }
+
+    #[test]
+    fn one_byte_below_irreducible_payload_returns_actionable_error() {
+        let mut request = request(vec![message("user", vec![text("hello")])]);
+        let exact = serialized_request_len(&request).unwrap();
+        let error = preflight_messages_request_with_limit(&mut request, exact - 1).unwrap_err();
+        assert_eq!(error.original_bytes, exact);
+        assert_eq!(error.limit_bytes, exact - 1);
+        let message = error.to_string();
+        assert!(message.contains("Anthropic /v1/messages payload is"));
+        assert!(message.contains("Shorten system/instruction files or tool schemas"));
+        assert!(message.contains("redirect large tool output to a file"));
     }
 
     #[test]
@@ -1138,18 +1373,19 @@ mod request_size_tests {
             message("assistant", vec![text("answer")]),
             message("user", vec![text("current")]),
         ]);
-        let stats = compact_request_to_fit(&mut request, 1800).unwrap();
+        let stats = preflight_messages_request_with_limit(&mut request, 1800).unwrap();
         assert_eq!(stats.images_omitted, 1);
         assert_eq!(stats.messages_dropped, 0);
         assert!(stats.final_bytes <= 1800);
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("Older inline image omitted"));
+        assert!(json.contains("Image omitted by daanio"));
         assert!(json.contains("current"));
     }
 
     #[test]
     fn payload_preflight_truncates_large_tool_output() {
         let mut request = request(vec![
+            message("user", vec![text("run the tool")]),
             message(
                 "assistant",
                 vec![ApiContentBlock::ToolUse {
@@ -1170,13 +1406,14 @@ mod request_size_tests {
             message("assistant", vec![text("observed")]),
             message("user", vec![text("continue")]),
         ]);
-        let stats = compact_request_to_fit(&mut request, 400_000).unwrap();
+        let stats = preflight_messages_request_with_limit(&mut request, 400_000).unwrap();
         assert_eq!(stats.tool_results_truncated, 1);
         assert_eq!(stats.messages_dropped, 0);
         assert!(stats.final_bytes <= 400_000);
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("bytes truncated before sending"));
+        assert!(json.contains("Tool output truncated by daanio"));
         assert!(json.contains("continue"));
+        assert!(valid_anthropic_history(&request.messages));
     }
 
     #[test]
@@ -1191,8 +1428,14 @@ mod request_size_tests {
             message("assistant", vec![text("recent answer")]),
             message("user", vec![text("current request")]),
         ]);
-        let target = serde_json::to_vec(&request).unwrap().len() - 10_000;
-        let stats = compact_request_to_fit(&mut request, target).unwrap();
+        let target = serialized_request_len(&request).unwrap() - 10_000;
+        // The latest exchange and current message alone must fit, which makes
+        // the oldest complete exchange removable before text mutation.
+        let recent_only = request.messages[2..].to_vec();
+        let mut recent_request = request.clone();
+        recent_request.messages = recent_only;
+        let target = target.max(serialized_request_len(&recent_request).unwrap() + 256);
+        let stats = preflight_messages_request_with_limit(&mut request, target).unwrap();
         assert!(stats.messages_dropped >= 1);
         assert!(stats.context_capsule_bytes > 0);
         assert!(stats.context_capsule_bytes <= MAX_CONTEXT_CAPSULE_BYTES);
@@ -1200,7 +1443,9 @@ mod request_size_tests {
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("Compacted earlier conversation context"));
         assert!(json.contains("oldest-marker"));
+        assert!(json.contains("recent question"));
         assert!(json.contains("current request"));
+        assert!(valid_anthropic_history(&request.messages));
     }
 
     #[test]
@@ -1227,11 +1472,77 @@ mod request_size_tests {
     }
 
     #[test]
+    fn oldest_tool_use_and_result_are_dropped_as_a_valid_unit() {
+        let mut request = request(vec![
+            message("user", vec![text("old tool question")]),
+            message(
+                "assistant",
+                vec![ApiContentBlock::ToolUse {
+                    id: "call-1".to_string(),
+                    name: "read".to_string(),
+                    input: json!({"file_path":"old.log","padding":"x".repeat(12_000)}),
+                    cache_control: None,
+                }],
+            ),
+            message(
+                "user",
+                vec![ApiContentBlock::ToolResult {
+                    tool_use_id: "call-1".to_string(),
+                    content: ToolResultContent::Text("old result".to_string()),
+                    is_error: false,
+                }],
+            ),
+            message("assistant", vec![text("old tool answer")]),
+            message("user", vec![text("recent question")]),
+            message("assistant", vec![text("recent answer")]),
+            message("user", vec![text("current request")]),
+        ]);
+        let mut recent_request = request.clone();
+        recent_request.messages = request.messages[4..].to_vec();
+        let limit = serialized_request_len(&recent_request).unwrap() + 256;
+
+        let stats = preflight_messages_request_with_limit(&mut request, limit).unwrap();
+
+        assert!(stats.messages_dropped >= 4);
+        assert!(valid_anthropic_history(&request.messages));
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(!json.contains("\"type\":\"tool_use\""));
+        assert!(!json.contains("\"type\":\"tool_result\""));
+        assert!(json.contains("recent question"));
+        assert!(json.contains("current request"));
+    }
+
+    #[test]
     fn payload_preflight_errors_when_current_message_alone_cannot_fit() {
         let mut request = request(vec![message("user", vec![text("z".repeat(4096))])]);
-        let error = compact_request_to_fit(&mut request, 512).unwrap_err();
-        assert!(error.contains("current message, system prompt, or tool definitions"));
-        assert!(error.contains("Remove or split"));
+        let error = preflight_messages_request_with_limit(&mut request, 512).unwrap_err();
+        assert!(error.final_bytes > error.limit_bytes);
+        assert!(error.to_string().contains("shorten the latest prompt"));
+    }
+
+    #[test]
+    fn exact_length_counts_system_tools_and_base64() {
+        let mut request = request(vec![message(
+            "user",
+            vec![ApiContentBlock::Image {
+                source: ApiImageSource {
+                    kind: "base64".to_string(),
+                    media_type: "image/png".to_string(),
+                    data: "QUJDRA==".repeat(100),
+                },
+            }],
+        )]);
+        request.system = build_system_param("system-marker", false, false);
+        request.tools = Some(vec![ApiTool {
+            name: "tool-marker".to_string(),
+            description: "description".repeat(20),
+            input_schema: json!({"type":"object","properties":{"value":{"type":"string"}}}),
+            cache_control: None,
+        }]);
+        assert_eq!(
+            serialized_request_len(&request).unwrap(),
+            serde_json::to_vec(&request).unwrap().len()
+        );
     }
 }
 
