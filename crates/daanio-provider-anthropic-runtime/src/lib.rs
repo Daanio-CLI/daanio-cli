@@ -1011,7 +1011,7 @@ impl Provider for AnthropicProvider {
         let (thinking, output_config, temperature) =
             self.build_reasoning_request_parts(&model, is_oauth);
 
-        let request = ApiRequest {
+        let mut request = ApiRequest {
             model: api_model,
             max_tokens: self.max_tokens,
             system: build_system_param(system, is_oauth),
@@ -1032,6 +1032,22 @@ impl Provider for AnthropicProvider {
             service_tier: self.current_service_tier_for_model(&model),
             stream: true,
         };
+
+        let size_compaction = daanio_provider_anthropic::compact_request_to_fit(
+            &mut request,
+            daanio_provider_anthropic::MAX_REQUEST_BYTES,
+        )
+        .map_err(anyhow::Error::msg)?;
+        if size_compaction.original_bytes != size_compaction.final_bytes {
+            daanio_base::logging::warn(&format!(
+                "Anthropic request-size preflight compacted {} -> {} bytes (images omitted={}, tool results truncated={}, old messages dropped={})",
+                size_compaction.original_bytes,
+                size_compaction.final_bytes,
+                size_compaction.images_omitted,
+                size_compaction.tool_results_truncated,
+                size_compaction.messages_dropped,
+            ));
+        }
 
         log_anthropic_canonical_input(&model, "anthropic_messages", &request, is_oauth, false);
 
@@ -1368,7 +1384,7 @@ impl Provider for AnthropicProvider {
         let (thinking, output_config, temperature) =
             self.build_reasoning_request_parts(&model, is_oauth);
 
-        let request = ApiRequest {
+        let mut request = ApiRequest {
             model: api_model,
             max_tokens: self.max_tokens,
             system: build_system_param_split(system_static, system_dynamic, is_oauth),
@@ -1389,6 +1405,22 @@ impl Provider for AnthropicProvider {
             service_tier: self.current_service_tier_for_model(&model),
             stream: true,
         };
+
+        let size_compaction = daanio_provider_anthropic::compact_request_to_fit(
+            &mut request,
+            daanio_provider_anthropic::MAX_REQUEST_BYTES,
+        )
+        .map_err(anyhow::Error::msg)?;
+        if size_compaction.original_bytes != size_compaction.final_bytes {
+            daanio_base::logging::warn(&format!(
+                "Anthropic request-size preflight compacted {} -> {} bytes (images omitted={}, tool results truncated={}, old messages dropped={})",
+                size_compaction.original_bytes,
+                size_compaction.final_bytes,
+                size_compaction.images_omitted,
+                size_compaction.tool_results_truncated,
+                size_compaction.messages_dropped,
+            ));
+        }
 
         log_anthropic_canonical_input(&model, "anthropic_messages_split", &request, is_oauth, true);
 

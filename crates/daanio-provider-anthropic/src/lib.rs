@@ -3,6 +3,186 @@ use daanio_provider_core::anthropic_map_tool_name_for_oauth as map_tool_name_for
 use serde::Serialize;
 use serde_json::{Value, json};
 
+/// Anthropic rejects Messages API bodies at roughly 32 MiB. Keep two MiB of
+/// headroom for gateway differences and future envelope fields.
+pub const MAX_REQUEST_BYTES: usize = 30 * 1024 * 1024;
+
+const MAX_TOOL_RESULT_BYTES_AFTER_COMPACTION: usize = 256 * 1024;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RequestSizeCompaction {
+    pub original_bytes: usize,
+    pub final_bytes: usize,
+    pub images_omitted: usize,
+    pub tool_results_truncated: usize,
+    pub messages_dropped: usize,
+}
+
+/// Bound the exact serialized Anthropic request before it reaches the network.
+///
+/// Token accounting cannot protect this limit because inline base64 images and
+/// verbose tool results can be many megabytes while costing relatively few
+/// model tokens. Reduction is deliberately ordered from least to most lossy:
+/// old inline images, old large tool results, then complete old messages. The
+/// newest message and system/tool definitions are never silently truncated.
+pub fn compact_request_to_fit(
+    request: &mut ApiRequest,
+    max_bytes: usize,
+) -> Result<RequestSizeCompaction, String> {
+    let original_bytes = serialized_request_bytes(request)?;
+    let mut stats = RequestSizeCompaction {
+        original_bytes,
+        final_bytes: original_bytes,
+        ..RequestSizeCompaction::default()
+    };
+    if original_bytes <= max_bytes {
+        return Ok(stats);
+    }
+
+    while stats.final_bytes > max_bytes && omit_oldest_image(&mut request.messages) {
+        stats.images_omitted += 1;
+        stats.final_bytes = serialized_request_bytes(request)?;
+    }
+
+    while stats.final_bytes > max_bytes
+        && truncate_oldest_large_tool_result(
+            &mut request.messages,
+            MAX_TOOL_RESULT_BYTES_AFTER_COMPACTION,
+        )
+    {
+        stats.tool_results_truncated += 1;
+        stats.final_bytes = serialized_request_bytes(request)?;
+    }
+
+    while stats.final_bytes > max_bytes && request.messages.len() > 1 {
+        request.messages.remove(0);
+        stats.messages_dropped += 1;
+        discard_leading_orphan_tool_results(&mut request.messages);
+        stats.final_bytes = serialized_request_bytes(request)?;
+    }
+
+    if stats.final_bytes > max_bytes {
+        return Err(format!(
+            "Anthropic request is {} bytes after removing old images, truncating old tool outputs, and dropping old conversation history; the configured safe limit is {} bytes. The current message, system prompt, or tool definitions are individually too large. Remove or split the newest attachment/output and retry.",
+            stats.final_bytes, max_bytes
+        ));
+    }
+
+    Ok(stats)
+}
+
+fn serialized_request_bytes(request: &ApiRequest) -> Result<usize, String> {
+    serde_json::to_vec(request)
+        .map(|body| body.len())
+        .map_err(|error| format!("failed to serialize Anthropic request: {error}"))
+}
+
+fn omitted_image_text(source: &ApiImageSource) -> String {
+    format!(
+        "[Older inline image omitted before sending because the serialized request approached the provider size limit: media_type={}, original_base64_chars={}. Re-open or re-attach the image if it is still needed.]",
+        source.media_type,
+        source.data.len()
+    )
+}
+
+fn omit_oldest_image(messages: &mut [ApiMessage]) -> bool {
+    for message in messages {
+        for block in &mut message.content {
+            match block {
+                ApiContentBlock::Image { source } => {
+                    let text = omitted_image_text(source);
+                    *block = ApiContentBlock::Text {
+                        text,
+                        cache_control: None,
+                    };
+                    return true;
+                }
+                ApiContentBlock::ToolResult { content, .. } => {
+                    let ToolResultContent::Blocks(blocks) = content else {
+                        continue;
+                    };
+                    if let Some(index) = blocks
+                        .iter()
+                        .position(|item| matches!(item, ToolResultContentBlock::Image { .. }))
+                    {
+                        let ToolResultContentBlock::Image { source } = &blocks[index] else {
+                            unreachable!();
+                        };
+                        let text = omitted_image_text(source);
+                        blocks[index] = ToolResultContentBlock::Text { text };
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
+fn truncate_text_for_payload(text: &mut String, max_bytes: usize) -> bool {
+    if text.len() <= max_bytes {
+        return false;
+    }
+    let original_bytes = text.len();
+    let head_budget = max_bytes.saturating_mul(3) / 4;
+    let tail_budget = max_bytes.saturating_sub(head_budget);
+    let mut head_end = head_budget.min(text.len());
+    while head_end > 0 && !text.is_char_boundary(head_end) {
+        head_end -= 1;
+    }
+    let mut tail_start = text.len().saturating_sub(tail_budget);
+    while tail_start < text.len() && !text.is_char_boundary(tail_start) {
+        tail_start += 1;
+    }
+    let marker = format!(
+        "\n\n... [{} bytes truncated before sending because the request approached the provider size limit] ...\n\n",
+        original_bytes.saturating_sub(head_end + text.len().saturating_sub(tail_start))
+    );
+    *text = format!("{}{}{}", &text[..head_end], marker, &text[tail_start..]);
+    true
+}
+
+fn truncate_oldest_large_tool_result(messages: &mut [ApiMessage], max_bytes: usize) -> bool {
+    for message in messages {
+        for block in &mut message.content {
+            let ApiContentBlock::ToolResult { content, .. } = block else {
+                continue;
+            };
+            match content {
+                ToolResultContent::Text(text) => {
+                    if truncate_text_for_payload(text, max_bytes) {
+                        return true;
+                    }
+                }
+                ToolResultContent::Blocks(blocks) => {
+                    for item in blocks {
+                        if let ToolResultContentBlock::Text { text } = item
+                            && truncate_text_for_payload(text, max_bytes)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn discard_leading_orphan_tool_results(messages: &mut Vec<ApiMessage>) {
+    while let Some(first) = messages.first_mut() {
+        first
+            .content
+            .retain(|block| !matches!(block, ApiContentBlock::ToolResult { .. }));
+        if first.content.is_empty() {
+            messages.remove(0);
+        } else {
+            break;
+        }
+    }
+}
+
 /// Claude Code billing attribution text observed in the official CLI's system
 /// prompt blocks.
 pub const OAUTH_BILLING_HEADER: &str = "cc_version=2.1.123; cc_entrypoint=sdk-cli; cch=33f85;";
@@ -772,6 +952,119 @@ pub struct ApiTool {
     pub input_schema: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_control: Option<CacheControlParam>,
+}
+
+#[cfg(test)]
+mod request_size_tests {
+    use super::*;
+
+    fn request(messages: Vec<ApiMessage>) -> ApiRequest {
+        ApiRequest {
+            model: "claude-sonnet-4-6".to_string(),
+            max_tokens: 1024,
+            system: None,
+            messages,
+            tools: None,
+            metadata: None,
+            thinking: None,
+            output_config: None,
+            temperature: None,
+            service_tier: None,
+            stream: true,
+        }
+    }
+
+    fn message(role: &str, content: Vec<ApiContentBlock>) -> ApiMessage {
+        ApiMessage {
+            role: role.to_string(),
+            content,
+        }
+    }
+
+    fn text(value: impl Into<String>) -> ApiContentBlock {
+        ApiContentBlock::Text {
+            text: value.into(),
+            cache_control: None,
+        }
+    }
+
+    #[test]
+    fn payload_below_limit_is_unchanged() {
+        let mut request = request(vec![message("user", vec![text("hello")])]);
+        let before = serde_json::to_vec(&request).unwrap();
+        let stats = compact_request_to_fit(&mut request, before.len()).unwrap();
+        assert_eq!(stats.original_bytes, stats.final_bytes);
+        assert_eq!(serde_json::to_vec(&request).unwrap(), before);
+    }
+
+    #[test]
+    fn payload_preflight_omits_oldest_base64_image_first() {
+        let image = ApiContentBlock::Image {
+            source: ApiImageSource {
+                kind: "base64".to_string(),
+                media_type: "image/png".to_string(),
+                data: "A".repeat(4096),
+            },
+        };
+        let mut request = request(vec![
+            message("user", vec![image, text("old")]),
+            message("assistant", vec![text("answer")]),
+            message("user", vec![text("current")]),
+        ]);
+        let stats = compact_request_to_fit(&mut request, 1800).unwrap();
+        assert_eq!(stats.images_omitted, 1);
+        assert_eq!(stats.messages_dropped, 0);
+        assert!(stats.final_bytes <= 1800);
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("Older inline image omitted"));
+        assert!(json.contains("current"));
+    }
+
+    #[test]
+    fn payload_preflight_truncates_large_tool_output() {
+        let mut request = request(vec![
+            message(
+                "user",
+                vec![ApiContentBlock::ToolResult {
+                    tool_use_id: "tool-1".to_string(),
+                    content: ToolResultContent::Text("x".repeat(900_000)),
+                    is_error: false,
+                }],
+            ),
+            message("assistant", vec![text("observed")]),
+            message("user", vec![text("continue")]),
+        ]);
+        let stats = compact_request_to_fit(&mut request, 400_000).unwrap();
+        assert_eq!(stats.tool_results_truncated, 1);
+        assert_eq!(stats.messages_dropped, 0);
+        assert!(stats.final_bytes <= 400_000);
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("bytes truncated before sending"));
+        assert!(json.contains("continue"));
+    }
+
+    #[test]
+    fn payload_preflight_drops_old_history_but_preserves_current_message() {
+        let mut request = request(vec![
+            message("user", vec![text("old".repeat(300_000))]),
+            message("assistant", vec![text("old answer".repeat(100_000))]),
+            message("user", vec![text("current request")]),
+        ]);
+        let stats = compact_request_to_fit(&mut request, 1000).unwrap();
+        assert!(stats.messages_dropped >= 2);
+        assert!(stats.final_bytes <= 1000);
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("current request"));
+        assert!(!json.contains("old answer"));
+    }
+
+    #[test]
+    fn payload_preflight_errors_when_current_message_alone_cannot_fit() {
+        let mut request = request(vec![message("user", vec![text("z".repeat(4096))])]);
+        let error = compact_request_to_fit(&mut request, 512).unwrap_err();
+        assert!(error.contains("current message, system prompt, or tool definitions"));
+        assert!(error.contains("Remove or split"));
+    }
 }
 
 #[cfg(test)]
