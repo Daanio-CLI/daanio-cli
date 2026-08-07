@@ -385,6 +385,67 @@ fn history_reload_recovery_does_not_infer_pending_user_turn_without_reload_marke
 }
 
 #[test]
+fn history_reload_recovery_does_not_infer_an_ordinary_crash() -> Result<()> {
+    let _lock = crate::storage::lock_test_env();
+    let home = tempfile::TempDir::new()?;
+    let runtime = tempfile::TempDir::new()?;
+    let _guard = ReloadHistoryEnvGuard::new(home.path(), runtime.path());
+    let session_id = "session_history_ordinary_crash";
+    write_pending_user_session(
+        session_id,
+        crate::session::SessionStatus::Crashed {
+            message: Some("Terminal or window closed (SIGHUP)".to_string()),
+        },
+    )?;
+
+    assert!(!super::infer_persisted_session_interrupted_by_reload(
+        session_id
+    ));
+    assert!(super::history_reload_recovery_snapshot(session_id, None).is_none());
+    Ok(())
+}
+
+#[test]
+fn history_reload_recovery_does_not_infer_a_crash_without_reason() -> Result<()> {
+    let _lock = crate::storage::lock_test_env();
+    let home = tempfile::TempDir::new()?;
+    let runtime = tempfile::TempDir::new()?;
+    let _guard = ReloadHistoryEnvGuard::new(home.path(), runtime.path());
+    let session_id = "session_history_crash_without_reason";
+    write_pending_user_session(
+        session_id,
+        crate::session::SessionStatus::Crashed { message: None },
+    )?;
+
+    assert!(!super::infer_persisted_session_interrupted_by_reload(
+        session_id
+    ));
+    assert!(super::history_reload_recovery_snapshot(session_id, None).is_none());
+    Ok(())
+}
+
+#[test]
+fn history_reload_recovery_infers_the_exact_reload_crash_reason() -> Result<()> {
+    let _lock = crate::storage::lock_test_env();
+    let home = tempfile::TempDir::new()?;
+    let runtime = tempfile::TempDir::new()?;
+    let _guard = ReloadHistoryEnvGuard::new(home.path(), runtime.path());
+    let session_id = "session_history_reload_crash";
+    write_pending_user_session(
+        session_id,
+        crate::session::SessionStatus::Crashed {
+            message: Some("Server reload interrupted processing".to_string()),
+        },
+    )?;
+
+    assert!(super::infer_persisted_session_interrupted_by_reload(
+        session_id
+    ));
+    assert!(super::history_reload_recovery_snapshot(session_id, None).is_some());
+    Ok(())
+}
+
+#[test]
 fn history_reload_recovery_does_not_mark_delivered_until_continuation_is_accepted() -> Result<()> {
     let _lock = crate::storage::lock_test_env();
     let home = tempfile::TempDir::new()?;

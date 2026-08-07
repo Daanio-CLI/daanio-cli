@@ -2,7 +2,8 @@ use super::{
     claim_live_target_agent, handle_clear_session, handle_reload, handle_resume_session,
     handle_subscribe, mark_remote_reload_started, remove_detached_source_if_unclaimed,
     rename_shutdown_signal, rename_swarm_member_session, restored_session_was_interrupted,
-    session_was_interrupted_by_reload, subscribe_should_mark_ready,
+    session_status_was_interrupted_by_reload, session_was_interrupted_by_reload,
+    subscribe_should_mark_ready,
 };
 use crate::agent::Agent;
 use crate::message::ContentBlock;

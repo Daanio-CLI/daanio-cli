@@ -51,6 +51,16 @@ pub(super) fn session_was_interrupted_by_reload(agent: &Agent) -> bool {
     })
 }
 
+pub(super) fn session_status_was_interrupted_by_reload(
+    status: &crate::session::SessionStatus,
+) -> bool {
+    matches!(
+        status,
+        crate::session::SessionStatus::Crashed { message: Some(message) }
+            if message == "Server reload interrupted processing"
+    )
+}
+
 pub(super) fn restored_session_was_interrupted(
     session_id: &str,
     previous_status: &crate::session::SessionStatus,
@@ -88,10 +98,8 @@ pub(super) fn restored_session_was_interrupted(
         ));
     }
 
-    matches!(
-        previous_status,
-        crate::session::SessionStatus::Crashed { .. }
-    ) || (matches!(previous_status, crate::session::SessionStatus::Active) && last_is_user)
+    session_status_was_interrupted_by_reload(previous_status)
+        || (matches!(previous_status, crate::session::SessionStatus::Active) && last_is_user)
         || last_is_reload_interrupted
         || closed_pending_user_during_reload
 }

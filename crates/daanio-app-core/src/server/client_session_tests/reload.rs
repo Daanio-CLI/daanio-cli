@@ -96,6 +96,46 @@ fn ignores_normal_tool_errors() {
 }
 
 #[test]
+fn ordinary_terminal_crash_does_not_count_as_reload_interruption() {
+    let status = crate::session::SessionStatus::Crashed {
+        message: Some("Terminal or window closed (SIGHUP)".to_string()),
+    };
+
+    assert!(!session_status_was_interrupted_by_reload(&status));
+    assert!(!restored_session_was_interrupted(
+        "session_terminal_closed",
+        &status,
+        &test_agent(vec![]),
+    ));
+}
+
+#[test]
+fn crash_without_a_reason_does_not_count_as_reload_interruption() {
+    let status = crate::session::SessionStatus::Crashed { message: None };
+
+    assert!(!session_status_was_interrupted_by_reload(&status));
+    assert!(!restored_session_was_interrupted(
+        "session_crash_without_reason",
+        &status,
+        &test_agent(vec![]),
+    ));
+}
+
+#[test]
+fn reload_crash_status_still_counts_as_reload_interruption() {
+    let status = crate::session::SessionStatus::Crashed {
+        message: Some("Server reload interrupted processing".to_string()),
+    };
+
+    assert!(session_status_was_interrupted_by_reload(&status));
+    assert!(restored_session_was_interrupted(
+        "session_reload_crash",
+        &status,
+        &test_agent(vec![]),
+    ));
+}
+
+#[test]
 fn restored_closed_session_with_reload_marker_still_counts_as_interrupted() {
     let agent = test_agent(vec![crate::session::StoredMessage {
         id: "msg_5".to_string(),
