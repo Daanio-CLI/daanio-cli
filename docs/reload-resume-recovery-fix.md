@@ -98,12 +98,26 @@ Completed:
   ~/.daanio/scratch/sauropod-stale-recovery-20260817T170900Z/
   ```
 
-- Resumed only Lighthouse Sauropod through the normal current-build client.
-- Observed it for more than 12 seconds. Its persisted transcript remained exactly 1,674 messages, no new user message was submitted, the stale phrase was absent, and no reload-recovery or pending-soft-interrupt record was recreated.
-- Issued a targeted cancel to Sauropod only to clear any real in-flight generation. No transcript message was added and the client remained open.
+- The first verification resume did not send reload-recovery text, but an inherited in-memory processing task later continued ordinary todo work. It appended 26 transcript entries and created two read-only child sessions. This was not acceptable as a normal idle resume even though it was distinct from the original recovery-directive bug.
+- Closed only the Sauropod client so server disconnect cleanup released that inherited task. Confirmed unrelated shared-server sessions remained available.
+- Archived the accidental 1,700-message snapshot and all state for the two child sessions under:
 
-The server session list still labels Sauropod `running` because the historical interrupted work retains four incomplete todos and a server-PID streaming marker. This is a separate stale activity-label issue, not an outbound send: the persisted session remains crashed, the transcript is unchanged, and no recovery continuation was queued or transmitted.
+  ```text
+  ~/.daanio/scratch/sauropod-accidental-continuation-20260817T172513Z/
+  ```
+
+- Restored Sauropod atomically from its untouched pre-resume backup, validating the exact ordinary crash status and 1,674-message transcript before replacement.
+- Confirmed the only observed emulator firewall change had already been restored to the intended local-only policy: IPv4 permits only loopback and `10.0.2.2`, and IPv6 rejects the app UID.
+- Relaunched only Lighthouse Sauropod through the normal current-build client.
+- Final verification after more than 30 seconds:
+  - Shared server reports `status: ready` and `is_processing: false`.
+  - Persisted session status is `Active`.
+  - Transcript remains exactly 1,674 messages.
+  - No reload-recovery, pending-soft-interrupt, or streaming marker exists.
+  - No recovery continuation text appears anywhere in the transcript.
+  - The two accidental child sessions have no remaining live session, PID, todo, or journal state outside the archive.
+  - Unrelated sessions remain connected and healthy.
 
 ## Final Result
 
-The reported reload-resume loop is fixed. A later manual resume of an ordinary crashed session no longer synthesizes or sends reload recovery text, while genuine reload interruption and durable one-shot recovery paths remain covered by tests.
+The reported reload-resume loop is fixed. Lighthouse Sauropod now resumes silently into a ready, non-processing state with its original transcript intact. A later manual resume of an ordinary crashed session no longer synthesizes or sends reload recovery text, while genuine reload interruption and durable one-shot recovery paths remain covered by tests.
