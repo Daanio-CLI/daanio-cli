@@ -113,9 +113,12 @@ Completed:
   - Shared server reports `status: ready` and `is_processing: false`.
   - Persisted session status is `Active`.
   - Transcript remains exactly 1,674 messages.
+  - Persisted transcript SHA-256 is `102d632152ae559e260a2a6cf8bb49245f11e8e5aff1bd98b25f0b3aebc7d813`.
   - No reload-recovery, pending-soft-interrupt, or streaming marker exists.
   - No recovery continuation text appears anywhere in the transcript.
-  - The two accidental child sessions have no remaining live session, PID, todo, or journal state outside the archive.
+  - The two accidental child sessions were explicitly stopped. Their current provider turns finished asynchronously, so final journal/session/todo writes were allowed to quiesce before archival.
+  - All remaining child state was moved into the archive after shutdown stabilized. A fresh 30-second watch found no child session, PID, todo, or journal recreation outside the archive and no child process or live swarm member.
+  - The accidental-continuation archive contains 19 files totaling 129,777,410 bytes.
   - Unrelated sessions remain connected and healthy.
 
 ## Final Result
