@@ -81,10 +81,29 @@ The source fix was committed separately. Existing untracked files were preserved
 
 ## Deployment and Live Verification
 
-Pending:
+Completed:
 
-- Build the committed selfdev binary.
-- Reload Daanio through the supported selfdev workflow.
-- Confirm the shared server and unrelated sessions remain healthy.
-- Resume only Lighthouse Sauropod.
-- Observe it for at least 10 seconds and confirm it remains idle without automatically sending stale recovery text.
+- Built and published selfdev build `b908cdb1f` (`v0.2.18-dev`).
+- Gracefully reloaded the actual shared server socket through `daanio server reload --force`; handoff returned `handoff_ready: true`.
+- Confirmed unrelated sessions survived the reload.
+- Found a Sauropod-only pending recovery record that the old server created during handoff because its stale in-memory entry still said Sauropod was processing. The persisted session itself remained the ordinary crash case:
+
+  ```text
+  Crashed("Terminal or window closed (SIGHUP)")
+  ```
+
+- Archived the stale Sauropod recovery, pending-soft-interrupt, and streaming marker files under:
+
+  ```text
+  ~/.daanio/scratch/sauropod-stale-recovery-20260817T170900Z/
+  ```
+
+- Resumed only Lighthouse Sauropod through the normal current-build client.
+- Observed it for more than 12 seconds. Its persisted transcript remained exactly 1,674 messages, no new user message was submitted, the stale phrase was absent, and no reload-recovery or pending-soft-interrupt record was recreated.
+- Issued a targeted cancel to Sauropod only to clear any real in-flight generation. No transcript message was added and the client remained open.
+
+The server session list still labels Sauropod `running` because the historical interrupted work retains four incomplete todos and a server-PID streaming marker. This is a separate stale activity-label issue, not an outbound send: the persisted session remains crashed, the transcript is unchanged, and no recovery continuation was queued or transmitted.
+
+## Final Result
+
+The reported reload-resume loop is fixed. A later manual resume of an ordinary crashed session no longer synthesizes or sends reload recovery text, while genuine reload interruption and durable one-shot recovery paths remain covered by tests.
