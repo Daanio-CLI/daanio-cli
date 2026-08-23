@@ -8,6 +8,10 @@ on:
       - main
     paths:
       - .github/workflows/openwrt-armv7.yml
+      - Cargo.lock
+      - Cargo.toml
+      - crates/**
+      - src/**
 
 permissions:
   contents: read

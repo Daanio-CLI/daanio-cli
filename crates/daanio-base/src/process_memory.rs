@@ -315,7 +315,7 @@ pub fn purge_allocator() -> Result<AllocatorTuningInfo> {
         }))
     }
 
-    #[cfg(all(target_os = "linux", not(feature = "jemalloc")))]
+    #[cfg(all(target_os = "linux", target_env = "gnu", not(feature = "jemalloc")))]
     {
         // glibc has no arena purge API, but malloc_trim(0) walks all arenas
         // and returns freed pages to the OS (MADV_DONTNEED), which is the
@@ -328,7 +328,10 @@ pub fn purge_allocator() -> Result<AllocatorTuningInfo> {
         })
     }
 
-    #[cfg(all(not(target_os = "linux"), not(feature = "jemalloc")))]
+    #[cfg(all(
+        not(all(target_os = "linux", target_env = "gnu")),
+        not(feature = "jemalloc")
+    ))]
     {
         logging::warn("allocator purge requested but no purge mechanism is available");
         Err(anyhow!(
@@ -477,8 +480,8 @@ pub fn estimate_json_bytes<T: Serialize>(value: &T) -> usize {
 /// glibc malloc keeps pages freed by large transient allocations (history
 /// loads, provider payloads, render caches) inside its arenas, which shows up
 /// as unattributed RSS that never shrinks. On jemalloc builds this purges all
-/// arenas; on Linux system-allocator builds it calls `malloc_trim(0)`; on
-/// other platforms it is a no-op.
+/// arenas; on glibc system-allocator builds it calls `malloc_trim(0)`; on
+/// other libc/platform combinations it is a no-op.
 pub fn release_retained_heap(reason: &str) {
     #[cfg(feature = "jemalloc")]
     {
@@ -489,7 +492,7 @@ pub fn release_retained_heap(reason: &str) {
         }
     }
 
-    #[cfg(all(target_os = "linux", not(feature = "jemalloc")))]
+    #[cfg(all(target_os = "linux", target_env = "gnu", not(feature = "jemalloc")))]
     {
         unsafe extern "C" {
             fn malloc_trim(pad: usize) -> i32;
@@ -505,7 +508,10 @@ pub fn release_retained_heap(reason: &str) {
         ));
     }
 
-    #[cfg(all(not(target_os = "linux"), not(feature = "jemalloc")))]
+    #[cfg(all(
+        not(all(target_os = "linux", target_env = "gnu")),
+        not(feature = "jemalloc")
+    ))]
     {
         let _ = reason;
     }
