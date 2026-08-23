@@ -102,7 +102,7 @@ jobs:
           } 2>&1 | tee openwrt-verify.log
 
       - name: Report verification failure
-        if: steps.verify.outcome == 'failure'
+        if: ${{ failure() && steps.verify.outcome == 'failure' }}
         shell: bash
         run: |
           set -euo pipefail
