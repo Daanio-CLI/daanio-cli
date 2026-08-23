@@ -40,10 +40,28 @@ jobs:
           cache-all-crates: "true"
 
       - name: Build OpenWrt binary
-        run: >-
-          cross build --locked --release
-          --target armv7-unknown-linux-musleabihf
-          --no-default-features
+        shell: bash
+        run: |
+          set -o pipefail
+          cross build --locked --release \
+            --target armv7-unknown-linux-musleabihf \
+            --no-default-features 2>&1 | tee openwrt-build.log
+
+      - name: Report cross-build failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## OpenWrt cross-build failure"
+            echo
+            echo '```text'
+            tail -n 160 openwrt-build.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          message=$(tail -n 80 openwrt-build.log | \
+            sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a;N;$!ba;s/\n/%0A/g')
+          printf '::error title=OpenWrt cross-build failed::%s\n' "$message"
 
       - name: Verify static ARMv7 binary
         shell: bash
