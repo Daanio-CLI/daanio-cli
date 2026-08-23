@@ -82,6 +82,11 @@ jobs:
           path: target/armv7-unknown-linux-musleabihf
           key: openwrt-armv7-target-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
 
+      - name: Install QEMU user emulator
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user
+
       - name: Verify static ARMv7 binary
         id: verify
         shell: bash
@@ -96,9 +101,7 @@ jobs:
               readelf -d "$binary" >&2
               exit 1
             fi
-            cross run --locked --release \
-              --target armv7-unknown-linux-musleabihf \
-              --no-default-features --bin daanio -- --version
+            qemu-arm "$binary" --version
           } 2>&1 | tee openwrt-verify.log
 
       - name: Report verification failure
