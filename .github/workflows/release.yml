@@ -195,6 +195,11 @@ jobs:
           files: dist/${{ matrix.artifact }}.tar.gz
           fail_on_unmatched_files: true
 
+  build-openwrt-armv7:
+    name: Build OpenWrt ARMv7
+    needs: create-release
+    uses: ./.github/workflows/openwrt-armv7.yml
+
   build-windows:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -540,7 +545,7 @@ jobs:
 
   release:
     name: Finalize release
-    needs: [create-release, build-linux-macos, publish-windows, build-freebsd]
+    needs: [create-release, build-linux-macos, build-openwrt-armv7, publish-windows, build-freebsd]
     # Every platform is independent. Wait until all jobs reach a terminal state,
     # then publish whichever assets succeeded. Only draft creation is mandatory.
     if: ${{ always() && needs.create-release.result == 'success' }}
@@ -615,6 +620,7 @@ jobs:
 
           linux_x86_64=$(available artifacts/daanio-linux-x86_64/daanio-linux-x86_64.tar.gz)
           linux_aarch64=$(available artifacts/daanio-linux-aarch64/daanio-linux-aarch64.tar.gz)
+          openwrt_armv7=$(available artifacts/daanio-openwrt-armv7/daanio-openwrt-armv7.tar.gz)
           macos_aarch64=$(available artifacts/daanio-macos-aarch64/daanio-macos-aarch64.tar.gz)
           macos_x86_64=$(available artifacts/daanio-macos-x86_64/daanio-macos-x86_64.tar.gz)
           windows_x86_64=$(available artifacts/daanio-windows-x86_64/daanio-windows-x86_64.exe)
@@ -634,6 +640,7 @@ jobs:
           {
             echo "LINUX_X86_64_AVAILABLE=$linux_x86_64"
             echo "LINUX_AARCH64_AVAILABLE=$linux_aarch64"
+            echo "OPENWRT_ARMV7_AVAILABLE=$openwrt_armv7"
             echo "MACOS_AARCH64_AVAILABLE=$macos_aarch64"
             echo "MACOS_X86_64_AVAILABLE=$macos_x86_64"
             echo "WINDOWS_X86_64_AVAILABLE=$windows_x86_64"
@@ -646,6 +653,7 @@ jobs:
             echo "## Platform availability"
             echo "- Linux x86_64: $linux_x86_64"
             echo "- Linux aarch64: $linux_aarch64"
+            echo "- OpenWrt ARMv7: $openwrt_armv7"
             echo "- macOS Apple Silicon: $macos_aarch64"
             echo "- macOS Intel: $macos_x86_64"
             echo "- Windows x86_64: $windows_x86_64"
@@ -715,6 +723,7 @@ jobs:
 
               - Linux x86_64: {status('LINUX_X86_64_AVAILABLE')}
               - Linux aarch64: {status('LINUX_AARCH64_AVAILABLE')}
+              - OpenWrt ARMv7: {status('OPENWRT_ARMV7_AVAILABLE')}
               - macOS Apple Silicon: {status('MACOS_AARCH64_AVAILABLE')}
               - macOS Intel: {status('MACOS_X86_64_AVAILABLE')}
               - Windows x86_64: {status('WINDOWS_X86_64_AVAILABLE')}
