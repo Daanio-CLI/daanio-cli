@@ -473,9 +473,9 @@ impl Provider for OpenRouterProvider {
             daanio_provider_core::GEMINI_SELECTABLE_EFFORTS.to_vec()
         } else if self.supports_xai_reasoning_effort() {
             daanio_provider_core::XAI_SELECTABLE_EFFORTS.to_vec()
-        } else if self.supports_daanio_catalog_reasoning_effort() {
-            daanio_provider_core::OPENAI_SELECTABLE_EFFORTS.to_vec()
-        } else if self.supports_openai_reasoning_effort() {
+        } else if self.supports_daanio_catalog_reasoning_effort()
+            || self.supports_openai_reasoning_effort()
+        {
             daanio_provider_core::OPENAI_SELECTABLE_EFFORTS.to_vec()
         } else if Self::profile_supports_unified_reasoning(
             self.profile_id.as_deref(),

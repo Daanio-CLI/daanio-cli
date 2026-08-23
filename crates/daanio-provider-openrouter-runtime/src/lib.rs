@@ -1101,9 +1101,9 @@ impl OpenRouterProvider {
             Self::normalize_gemini_reasoning_effort(effort)
         } else if self.supports_xai_reasoning_effort() {
             Self::normalize_xai_reasoning_effort(effort)
-        } else if self.supports_daanio_catalog_reasoning_effort() {
-            Self::normalize_openai_reasoning_effort(effort)
-        } else if self.supports_openai_reasoning_effort() {
+        } else if self.supports_daanio_catalog_reasoning_effort()
+            || self.supports_openai_reasoning_effort()
+        {
             Self::normalize_openai_reasoning_effort(effort)
         } else {
             Self::normalize_unified_reasoning_effort(effort)
