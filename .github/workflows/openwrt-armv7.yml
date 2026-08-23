@@ -83,20 +83,39 @@ jobs:
           key: openwrt-armv7-target-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
 
       - name: Verify static ARMv7 binary
+        id: verify
         shell: bash
         run: |
           set -euo pipefail
-          binary=target/armv7-unknown-linux-musleabihf/release/daanio
-          file "$binary"
-          readelf -h "$binary"
-          if readelf -d "$binary" 2>/dev/null | grep -q '(NEEDED)'; then
-            echo "OpenWrt binary unexpectedly has dynamic library dependencies" >&2
-            readelf -d "$binary" >&2
-            exit 1
-          fi
-          cross run --locked --release \
-            --target armv7-unknown-linux-musleabihf \
-            --no-default-features -- --version
+          {
+            binary=target/armv7-unknown-linux-musleabihf/release/daanio
+            file "$binary"
+            readelf -h "$binary"
+            if readelf -d "$binary" 2>/dev/null | grep -q '(NEEDED)'; then
+              echo "OpenWrt binary unexpectedly has dynamic library dependencies" >&2
+              readelf -d "$binary" >&2
+              exit 1
+            fi
+            cross run --locked --release \
+              --target armv7-unknown-linux-musleabihf \
+              --no-default-features -- --version
+          } 2>&1 | tee openwrt-verify.log
+
+      - name: Report verification failure
+        if: steps.verify.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## OpenWrt verification failure"
+            echo
+            echo '```text'
+            tail -n 100 openwrt-verify.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          message=$(sed $'s/\033\\[[0-9;]*m//g' openwrt-verify.log | tail -c 3500 | \
+            sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a;N;$!ba;s/\n/%0A/g')
+          printf '::error title=OpenWrt verification failed::%s\n' "$message"
 
       - name: Package OpenWrt artifact
         shell: bash
