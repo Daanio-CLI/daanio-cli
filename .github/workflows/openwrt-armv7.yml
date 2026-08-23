@@ -98,7 +98,7 @@ jobs:
             fi
             cross run --locked --release \
               --target armv7-unknown-linux-musleabihf \
-              --no-default-features -- --version
+              --no-default-features --bin daanio -- --version
           } 2>&1 | tee openwrt-verify.log
 
       - name: Report verification failure
