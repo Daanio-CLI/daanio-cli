@@ -83,6 +83,24 @@ pub const ALL_OPENAI_MODELS: &[&str] = &[
 /// Default context window size when model-specific data isn't known.
 pub const DEFAULT_CONTEXT_LIMIT: usize = 200_000;
 
+/// Verified total context windows for enabled frontier models whose values
+/// differ from the broader family fallbacks below.
+///
+/// These values mirror the Daanio model catalog snapshot generated on
+/// 2026-08-24. Exact model ids are intentional: older and provider-specific
+/// variants retain their existing runtime-catalog or family behavior.
+fn verified_frontier_context_limit(model: &str) -> Option<usize> {
+    match model {
+        "gpt-5.4" => Some(1_050_000),
+        "gpt-5.4-mini" => Some(400_000),
+        "gpt-5.5" | "gpt-5.6-luna" | "gpt-5.6-sol" | "gpt-5.6-terra" => Some(1_050_000),
+        "gemini-pro-agent" => Some(1_000_000),
+        "grok-4.3" | "grok-4.5" => Some(262_144),
+        "grok-4.6" => Some(500_000),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelCapabilities {
     pub provider: Option<String>,
@@ -194,6 +212,8 @@ fn base_is_known_claude_model(base: &str) -> bool {
         "claude-opus-4.6",
         "claude-opus-4-5",
         "claude-opus-4.5",
+        "claude-opus-4-1",
+        "claude-opus-4.1",
         "claude-sonnet-5",
         "claude-sonnet-4-6",
         "claude-sonnet-4.6",
@@ -226,6 +246,10 @@ pub fn context_limit_for_model_with_provider_and_cache(
         return Some(copilot_context_limit_for_model(model));
     }
 
+    if let Some(limit) = verified_frontier_context_limit(model) {
+        return Some(limit);
+    }
+
     // Spark variant has a smaller context window than the full codex model.
     if model.starts_with("gpt-5.3-codex-spark") {
         return Some(128_000);
@@ -238,8 +262,9 @@ pub fn context_limit_for_model_with_provider_and_cache(
         return Some(128_000);
     }
 
-    // GPT-5.4-family models should default to the long-context window.
-    // The live Codex OAuth catalog can still override this via the dynamic cache above.
+    // Other GPT-5.4-family models should default to the long-context window.
+    // Authenticated provider runtimes can still override this fallback with
+    // their live catalog value.
     if model.starts_with("gpt-5.4") {
         return Some(1_000_000);
     }
@@ -507,6 +532,52 @@ mod tests {
             context_limit_for_model_with_provider("claude-opus-5", Some("claude")),
             Some(1_000_000)
         );
+    }
+
+    #[test]
+    fn configured_context_limits_match_daanio_catalog_snapshot() {
+        for (model, expected) in [
+            ("claude-fable-5", 1_000_000),
+            ("claude-haiku-4-5-20251001", 200_000),
+            ("claude-opus-4-1-20250805", 200_000),
+            ("claude-opus-4-5-20251101", 200_000),
+            ("claude-opus-4-6", 200_000),
+            ("claude-opus-4-6-thinking", 200_000),
+            ("claude-opus-4-7", 1_000_000),
+            ("claude-opus-4-8", 1_000_000),
+            ("claude-opus-4-8[1m]", 1_000_000),
+            ("claude-opus-5", 1_000_000),
+            ("claude-sonnet-4-5-20250929", 200_000),
+            ("claude-sonnet-4-6", 200_000),
+            ("claude-sonnet-5", 1_000_000),
+            ("gemini-3-flash", 1_000_000),
+            ("gemini-3-flash-agent", 1_000_000),
+            ("gemini-3.1-flash-image", 1_000_000),
+            ("gemini-3.1-flash-lite", 1_000_000),
+            ("gemini-3.1-pro-low", 1_000_000),
+            ("gemini-3.5-flash-extra-low", 1_000_000),
+            ("gemini-3.5-flash-low", 1_000_000),
+            ("gemini-3.6-flash-high", 1_000_000),
+            ("gemini-pro-agent", 1_000_000),
+            ("kimi-k2.5", 262_144),
+            ("kimi-k2.6", 262_144),
+            ("kimi-k3", 262_144),
+            ("gpt-5.4", 1_050_000),
+            ("gpt-5.4-mini", 400_000),
+            ("gpt-5.5", 1_050_000),
+            ("gpt-5.6-luna", 1_050_000),
+            ("gpt-5.6-sol", 1_050_000),
+            ("gpt-5.6-terra", 1_050_000),
+            ("grok-4.3", 262_144),
+            ("grok-4.5", 262_144),
+            ("grok-4.6", 500_000),
+        ] {
+            assert_eq!(
+                context_limit_for_model(model),
+                Some(expected),
+                "wrong context window for {model}"
+            );
+        }
     }
 
     #[test]
