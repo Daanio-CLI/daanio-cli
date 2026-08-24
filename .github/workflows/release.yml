@@ -569,13 +569,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # macOS and Linux are the required public release set. Windows is
-          # published only when signing is configured, and FreeBSD is opt-in.
-          # Any optional assets that completed are still attached and included
-          # in SHA256SUMS by the later steps.
+          # macOS, Linux, and OpenWrt ARMv7 are the required public release set.
+          # Windows is published only when signing is configured, and FreeBSD
+          # is opt-in. Any optional assets that completed are still attached and
+          # included in SHA256SUMS by the later steps.
           expected=(
             artifacts/daanio-linux-x86_64/daanio-linux-x86_64.tar.gz
             artifacts/daanio-linux-aarch64/daanio-linux-aarch64.tar.gz
+            artifacts/daanio-openwrt-armv7/daanio-openwrt-armv7.tar.gz
             artifacts/daanio-macos-aarch64/daanio-macos-aarch64.tar.gz
             artifacts/daanio-macos-x86_64/daanio-macos-x86_64.tar.gz
           )
